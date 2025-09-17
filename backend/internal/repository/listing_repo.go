@@ -12,10 +12,10 @@ type ListParams struct {
 	Category string
 	PriceMin *float64
 	PriceMax *float64
-	Status   string // default "active"
-	Limit    int    // default 20
+	Status   string
+	Limit    int
 	Offset   int
-	Sort     string // created_desc | price_asc | price_desc
+	Sort     string
 }
 
 type ListingRepo interface {
