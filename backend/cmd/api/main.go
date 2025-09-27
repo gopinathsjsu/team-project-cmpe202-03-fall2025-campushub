@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/config"
-	repo "github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/repository"
+	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/platform/s3client"
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/repository/postgres"
 	httpx "github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/transport/http"
 )
@@ -36,11 +36,24 @@ func main() {
 	defer pool.Close()
 
 	listingsRepo := postgres.NewListingRepo(pool)
+	imagesRepo := postgres.NewImageRepo(pool)
+	s3c, err := s3client.New(ctx, s3client.Opts{
+		Region:         cfg.S3Region,
+		Bucket:         cfg.S3Bucket,
+		Endpoint:       cfg.S3Endpoint,
+		ForcePathStyle: cfg.S3PathStyle,
+	})
+	if err != nil {
+		log.Fatal("s3 init failed", zap.Error(err))
+	}
 
 	v := validator.New()
 	r := httpx.NewRouter(httpx.Deps{
-		Listings: repo.ListingRepo(listingsRepo),
-		Validate: v,
+		Listings:  listingsRepo,
+		Images:    imagesRepo,
+		Validate:  v,
+		S3:        s3c,
+		ExpiryMin: cfg.PresignExpiry,
 	})
 
 	if cfg.Env == "prod" {

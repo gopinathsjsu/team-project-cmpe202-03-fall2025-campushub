@@ -1,4 +1,3 @@
--- USERS (make sure sellers exist before inserting listings)
 INSERT INTO users (id, name, email, role) VALUES
 ('11111111-1111-1111-1111-111111111111','Demo Seller','seller@campus.edu','seller'),
 ('22222222-2222-2222-2222-222222222222','Alice Seller','alice@campus.edu','seller'),
@@ -7,7 +6,6 @@ INSERT INTO users (id, name, email, role) VALUES
 ('55555555-5555-5555-5555-555555555555','Admin One','admin@campus.edu','admin')
 ON CONFLICT (id) DO NOTHING;
 
--- LISTINGS (Textbooks, Gadgets, Essentials, Other)
 INSERT INTO listings (id, seller_id, title, description, category, price, condition, status) VALUES
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01','11111111-1111-1111-1111-111111111111','CMPE 202 Textbook','Used, good condition, pickup at library','Textbooks',35.00,'Good','active'),
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa02','11111111-1111-1111-1111-111111111111','CMPE 273 Textbook','Like new, no markings','Textbooks',40.00,'LikeNew','active'),
