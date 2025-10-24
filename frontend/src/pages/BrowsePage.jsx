@@ -10,7 +10,7 @@ import ListingCard from "../components/ListingCard";
 import EmptyState from "../components/EmptyState";
 
 export default function BrowsePage() {
-    // No longer need role-based restrictions
+    
     const [q, setQ] = useState("");
     const [category, setCategory] = useState("All");
     const [minPrice, setMinPrice] = useState("");

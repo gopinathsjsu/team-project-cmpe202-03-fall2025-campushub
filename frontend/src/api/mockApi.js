@@ -2,37 +2,153 @@
 let _id = 100;
 
 const mockListings = [
-  { id: 1, title: "CMPE 202 Textbook", description: "Used, good condition", price: 25, category: "Textbooks", images: [], seller: "alice@sjsu.edu", sold: false, createdAt: Date.now()-100000 },
-  { id: 2, title: "Calculator TI-84", description: "Works great", price: 60, category: "Electronics", images: [], seller: "bob@sjsu.edu", sold: false, createdAt: Date.now()-200000 },
+ {
+    id: 1,
+    sellerId: "11111111-1111-1111-1111-111111111111",
+    title: "CMPE 202 Textbook",
+    description: "Used, good condition. Lightly used, pickup at library",
+    price: 25,
+    category: "Textbooks",
+    condition: "Good",
+    status: "active",
+    images: [],
+    seller: "alice@sjsu.edu",
+    sold: false,
+    createdAt: Date.now() - 100000,
+    updatedAt: Date.now() - 100000,
+  },
+  {
+    id: 2,
+    sellerId: "22222222-2222-2222-2222-222222222222",
+    title: "Calculator TI-84",
+    description: "Works great, barely used",
+    price: 60,
+    category: "Electronics",
+    condition: "Like New",
+    status: "active",
+    images: [],
+    seller: "bob@sjsu.edu",
+    sold: false,
+    createdAt: Date.now() - 200000,
+    updatedAt: Date.now() - 200000,
+  },
+  {
+    id: 3,
+    sellerId: "11111111-1111-1111-1111-111111111111",
+    title: "MacBook Pro 2019",
+    description: "Great condition, comes with charger. Perfect for students.",
+    price: 800,
+    category: "Electronics",
+    condition: "Good",
+    status: "active",
+    images: [],
+    seller: "alice@sjsu.edu",
+    sold: false,
+    createdAt: Date.now() - 300000,
+    updatedAt: Date.now() - 300000,
+  },
+  {
+    id: 4,
+    sellerId: "33333333-3333-3333-3333-333333333333",
+    title: "Desk Chair - IKEA",
+    description: "Comfortable office chair, minor wear on armrests",
+    price: 45,
+    category: "Furniture",
+    condition: "Fair",
+    status: "active",
+    images: [],
+    seller: "charlie@sjsu.edu",
+    sold: true,
+    createdAt: Date.now() - 400000,
+    updatedAt: Date.now() - 50000,
+  }
 ];
 
 let mockReports = [
-  { id: "r1", listingId: 2, reason: "Missing photo", status: "open", createdAt: Date.now()-50000 },
+  { id: "r1", listingId: 2, reason: "Missing photo", status: "open",reportedBy: "user@sjsu.edu", createdAt: Date.now()-50000 },
 ];
 
 const mockApi = {
   async listListings(params) {
-    const { q = "", category, minPrice, maxPrice } = params;
+    const { q = "", category, status, sort, limit = 20, offset = 0, minPrice, maxPrice } = params;
     let data = [...mockListings];
     if (q) data = data.filter(l => `${l.title} ${l.description}`.toLowerCase().includes(q.toLowerCase()));
     if (category && category !== "All") data = data.filter(l => l.category === category);
+    if (status) {
+      data = data.filter((l) => l.status === status);
+    }
     if (minPrice) data = data.filter(l => l.price >= Number(minPrice));
     if (maxPrice) data = data.filter(l => l.price <= Number(maxPrice));
-    return { items: data.sort((a,b)=>b.createdAt-a.createdAt) };
+    if (sort === "created_desc" || !sort) {
+      data.sort((a, b) => b.createdAt - a.createdAt);
+    } else if (sort === "created_asc") {
+      data.sort((a, b) => a.createdAt - b.createdAt);
+    } else if (sort === "price_asc") {
+      data.sort((a, b) => a.price - b.price);
+    } else if (sort === "price_desc") {
+      data.sort((a, b) => b.price - a.price);
+    }
+    const paginatedData = data.slice(Number(offset), Number(offset) + Number(limit));
+
+    return {
+      items: paginatedData,
+      total: data.length,
+      limit: Number(limit),
+      offset: Number(offset),
+    };
   },
 
-  async getListing(id) { return mockListings.find(l => l.id === Number(id)); },
+  async getListing(id) { const listing = mockListings.find((l) => l.id === Number(id));
+    if (!listing) {
+      throw new Error("Listing not found");
+    }
+    return listing; },
 
   async createListing(payload) {
-    const newListing = { id: ++_id, sold: false, images: [], createdAt: Date.now(), ...payload };
+     const newListing = {
+      id: ++_id,
+      sellerId: payload.sellerId || "11111111-1111-1111-1111-111111111111",
+      title: payload.title,
+      description: payload.description,
+      price: payload.price,
+      category: payload.category,
+      condition: payload.condition || "Good",
+      status: "active",
+      images: [],
+      seller: "seller@sjsu.edu",
+      sold: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
     mockListings.push(newListing);
     return newListing;
   },
 
   async updateListing(id, payload) {
     const idx = mockListings.findIndex(l => l.id === Number(id));
-    mockListings[idx] = { ...mockListings[idx], ...payload };
+    mockListings[idx] = { ...mockListings[idx], ...payload, updatedAt: Date.now()};
     return mockListings[idx];
+  },
+
+  async markAsSold(id) {
+    const idx = mockListings.findIndex((l) => l.id === Number(id));
+    if (idx === -1) {
+      throw new Error("Listing not found");
+    }
+    mockListings[idx].sold = true;
+    mockListings[idx].status = "sold";
+    mockListings[idx].updatedAt = Date.now();
+    return mockListings[idx];
+  },
+
+  async deleteListing(id) {
+    const idx = mockListings.findIndex((l) => l.id === Number(id));
+    if (idx === -1) {
+      throw new Error("Listing not found");
+    }
+    mockListings[idx].status = "deleted";
+    mockListings[idx].updatedAt = Date.now();
+    return { success: true, message: "Listing deleted" };
   },
 
   async reportListing(id, reason) {

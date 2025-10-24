@@ -2,75 +2,166 @@
 import mockApi from "./mockApi";
 
 const USE_MOCK = true; // flip false when backend is ready
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
+
+const getAuthToken = () => {
+  return localStorage.getItem("authToken");
+};
+
+const setAuthToken = (token) => {
+  if (token) {
+    localStorage.setItem("authToken", token);
+  } else {
+    localStorage.removeItem("authToken");
+  }
+};
+
+const createHeaders = (includeAuth = false, contentType = "application/json") => {
+  const headers = {};
+  
+  if (contentType) {
+    headers["Content-Type"] = contentType;
+  }
+  
+  if (includeAuth) {
+    const token = getAuthToken();
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+  }
+  
+  return headers;
+};
+
+
+const handleResponse = async (response) => {
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({
+      message: `HTTP ${response.status}: ${response.statusText}`
+    }));
+    throw new Error(error.message || "API request failed");
+  }
+  return response.json();
+};
+
+const fetchAPI = async (endpoint, options = {}) => {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...createHeaders(options.auth, options.contentType),
+      ...options.headers,
+    },
+  });
+  return handleResponse(response);
+};
+
 
 const api = {
+
+  // ==================== Authentication ====================
+
+  setToken: (token) => {
+    setAuthToken(token);
+  },
+
+  getToken: () => {
+    return getAuthToken();
+  },
+
+  logout: () => {
+    setAuthToken(null);
+  },
+
+   // ==================== Listings ====================
+   
   async listListings(params = {}) {
     if (USE_MOCK) return mockApi.listListings(params);
-    const q = new URLSearchParams(params).toString();
-    const res = await fetch(`/api/listings?${q}`);
-    return res.json();
+    const queryParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        queryParams.append(key, value);
+      }
+    });
+    
+    const queryString = queryParams.toString();
+    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`);
   },
 
   async getListing(id) {
     if (USE_MOCK) return mockApi.getListing(id);
-    const res = await fetch(`/api/listings/${id}`);
-    return res.json();
+    return fetchAPI(`/listings/${id}`);
   },
 
   async createListing(payload) {
     if (USE_MOCK) return mockApi.createListing(payload);
-    const res = await fetch(`/api/listings`, {
+    return fetchAPI("/listings", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      auth: true,
       body: JSON.stringify(payload),
     });
-    return res.json();
   },
 
   async updateListing(id, payload) {
     if (USE_MOCK) return mockApi.updateListing(id, payload);
-    const res = await fetch(`/api/listings/${id}`, {
+    return fetchAPI(`/listings/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      auth: true,
       body: JSON.stringify(payload),
     });
-    return res.json();
+  },
+
+  async markAsSold(id) {
+    if (USE_MOCK) return mockApi.updateListing(id, { sold: true });
+    return fetchAPI(`/listings/${id}/mark-sold`, {
+      method: "POST",
+      auth: true,
+    });
+  },
+
+  async deleteListing(id) {
+    if (USE_MOCK) return mockApi.deleteListing(id);
+    return fetchAPI(`/listings/${id}`, {
+      method: "DELETE",
+      auth: true,
+    });
   },
 
   async reportListing(id, reason) {
     if (USE_MOCK) return mockApi.reportListing(id, reason);
-    const res = await fetch(`/api/listings/${id}/report`, {
+    return fetchAPI(`/listings/${id}/report`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      auth: true,
       body: JSON.stringify({ reason }),
     });
-    return res.json();
   },
+
+  // ==================== AI Chatbot ====================
 
   async chatbotSearch(query) {
     if (USE_MOCK) return mockApi.chatbotSearch(query);
-    const res = await fetch("/api/agent", {
+    return fetchAPI("/agent", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });
-    return res.json();
   },
+
+  // ==================== Admin - Reports ====================
 
   async listReports() {
     if (USE_MOCK) return mockApi.listReports();
-    const res = await fetch("/api/reports");
-    return res.json();
+    return fetchAPI("/reports", {
+      auth: true,
+    });
   },
 
   async resolveReport(id, action) {
     if (USE_MOCK) return mockApi.resolveReport(id, action);
-    const res = await fetch(`/api/reports/${id}`, {
+    return fetchAPI(`/reports/${id}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      auth: true,
       body: JSON.stringify({ action }),
     });
-    return res.json();
   },
 };
 
