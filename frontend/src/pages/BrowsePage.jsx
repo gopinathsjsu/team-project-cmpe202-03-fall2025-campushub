@@ -10,7 +10,7 @@ import ListingCard from "../components/ListingCard";
 import EmptyState from "../components/EmptyState";
 
 export default function BrowsePage() {
-    const { role } = useAuth();
+    // No longer need role-based restrictions
     const [q, setQ] = useState("");
     const [category, setCategory] = useState("All");
     const [minPrice, setMinPrice] = useState("");
@@ -88,18 +88,16 @@ export default function BrowsePage() {
                         </h1>
                         <p className="text-lg text-primary-100 mb-6">
                             Browse textbooks, electronics, furniture, and more
-                            from fellow SJSU students
+                            from fellow campus students
                         </p>
 
-                        {(role === "Seller" || role === "Admin") && (
-                            <Link
-                                to="/sell"
-                                className="inline-flex items-center space-x-2 bg-accent-500 hover:bg-accent-600 text-white px-6 py-3 rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl"
-                            >
-                                <Plus size={20} />
-                                <span>Post a Listing</span>
-                            </Link>
-                        )}
+                        <Link
+                            to="/sell"
+                            className="inline-flex items-center space-x-2 bg-accent-500 hover:bg-accent-600 text-white px-6 py-3 rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl"
+                        >
+                            <Plus size={20} />
+                            <span>Post a Listing</span>
+                        </Link>
                     </div>
                 </div>
             </div>
@@ -162,15 +160,13 @@ export default function BrowsePage() {
                                     : "Be the first to post a listing!"
                             }
                             action={
-                                (role === "Seller" || role === "Admin") && (
-                                    <Link
-                                        to="/sell"
-                                        className="inline-flex items-center space-x-2 bg-primary-500 hover:bg-primary-600 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                                    >
-                                        <Plus size={20} />
-                                        <span>Create Listing</span>
-                                    </Link>
-                                )
+                                <Link
+                                    to="/sell"
+                                    className="inline-flex items-center space-x-2 bg-primary-500 hover:bg-primary-600 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                                >
+                                    <Plus size={20} />
+                                    <span>Create Listing</span>
+                                </Link>
                             }
                         />
                     ) : (
@@ -181,11 +177,7 @@ export default function BrowsePage() {
                                     key={item.id}
                                     item={item}
                                     onReport={handleReport}
-                                    onToggleSold={
-                                        role === "Seller"
-                                            ? handleToggleSold
-                                            : undefined
-                                    }
+                                    onToggleSold={handleToggleSold}
                                 />
                             ))}
                         </div>

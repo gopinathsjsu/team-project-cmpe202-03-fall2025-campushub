@@ -2,8 +2,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/apiClient";
-import { useAuth } from "../context/AuthContext";
-import Gate from "./Gate";
+// No longer need role-based restrictions
 import ImagePicker from "../components/ImagePicker";
 import {
     Save,
@@ -24,7 +23,6 @@ const CATEGORIES = [
 ];
 
 export default function SellPage() {
-    const { role } = useAuth();
     const nav = useNavigate();
     const [form, setForm] = useState({
         title: "",
@@ -36,7 +34,7 @@ export default function SellPage() {
     const [loading, setLoading] = useState(false);
     const [errors, setErrors] = useState({});
 
-    if (role !== "Seller" && role !== "Admin") return <Gate role="Seller" />;
+    // All authenticated users can sell items
 
     const validateForm = () => {
         const newErrors = {};
@@ -116,7 +114,7 @@ export default function SellPage() {
                                 Create a Listing
                             </h1>
                             <p className="text-primary-100 mt-1">
-                                Share what you're selling with SJSU students
+                                Share what you're selling with campus students
                             </p>
                         </div>
                     </div>

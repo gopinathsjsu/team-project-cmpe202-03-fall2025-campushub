@@ -9,32 +9,27 @@ import {
     MessageCircle,
     Shield,
     Store,
-    Sparkles,
+    LogOut,
+    User,
 } from "lucide-react";
 import ChatbotButton from "./ChatbotButton";
 
 export default function NavBar() {
-    const { role, setRole } = useAuth();
+    const { isAuthenticated, isAdmin, userName, logout } = useAuth();
     const location = useLocation();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     const isActive = (path) => location.pathname === path;
 
     const navLinks = [
-        { path: "/", label: "Browse", icon: ShoppingBag },
+        { path: "/browse", label: "Browse", icon: ShoppingBag },
         { path: "/sell", label: "Sell", icon: Store },
         { path: "/chat", label: "Chat", icon: MessageCircle },
-        { path: "/admin", label: "Admin", icon: Shield, adminOnly: true },
     ];
 
-    const getRoleBadgeClass = (selectedRole) => {
-        const badges = {
-            Buyer: "bg-green-100 text-green-800",
-            Seller: "bg-accent-500 text-white",
-            Admin: "bg-red-100 text-red-800",
-        };
-        return badges[selectedRole] || badges.Buyer;
-    };
+    const adminNavLinks = [
+        { path: "/admin", label: "Moderation", icon: Shield },
+    ];
 
     return (
         <header className="sticky top-0 z-50 border-b border-primary-100 bg-white shadow-sm">
@@ -52,32 +47,45 @@ export default function NavBar() {
                                 CampusHub
                             </div>
                             <div className="text-[10px] text-accent-600 font-medium -mt-1">
-                                SJSU Marketplace
+                                Campus Marketplace
                             </div>
                         </div>
                     </Link>
 
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-1">
-                        {navLinks.map(
-                            ({ path, label, icon: Icon, adminOnly }) => {
-                                if (adminOnly && role !== "Admin") return null;
-
-                                return (
-                                    <Link
-                                        key={path}
-                                        to={path}
-                                        className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                            isActive(path)
-                                                ? "bg-primary-500 text-white shadow-md"
-                                                : "text-gray-700 hover:bg-primary-50 hover:text-primary-700"
-                                        }`}
-                                    >
-                                        <Icon size={16} />
-                                        <span>{label}</span>
-                                    </Link>
-                                );
-                            }
+                        {isAdmin ? (
+                            // Admin navigation - only moderation
+                            adminNavLinks.map(({ path, label, icon: Icon }) => (
+                                <Link
+                                    key={path}
+                                    to={path}
+                                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                        isActive(path)
+                                            ? "bg-red-500 text-white shadow-md"
+                                            : "text-gray-700 hover:bg-red-50 hover:text-red-700"
+                                    }`}
+                                >
+                                    <Icon size={16} />
+                                    <span>{label}</span>
+                                </Link>
+                            ))
+                        ) : (
+                            // Regular user navigation
+                            navLinks.map(({ path, label, icon: Icon }) => (
+                                <Link
+                                    key={path}
+                                    to={path}
+                                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                        isActive(path)
+                                            ? "bg-primary-500 text-white shadow-md"
+                                            : "text-gray-700 hover:bg-primary-50 hover:text-primary-700"
+                                    }`}
+                                >
+                                    <Icon size={16} />
+                                    <span>{label}</span>
+                                </Link>
+                            ))
                         )}
                     </nav>
 
@@ -88,33 +96,39 @@ export default function NavBar() {
                             <ChatbotButton />
                         </div>
 
-                        {/* Role Selector */}
-                        <div className="hidden md:block relative">
-                            <select
-                                value={role}
-                                onChange={(e) => setRole(e.target.value)}
-                                className={`appearance-none pl-3 pr-8 py-2 rounded-lg text-sm font-medium cursor-pointer border-2 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary-500 ${getRoleBadgeClass(
-                                    role
-                                )}`}
-                            >
-                                <option value="Buyer">Buyer</option>
-                                <option value="Seller">Seller</option>
-                                <option value="Admin">Admin</option>
-                            </select>
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
-                                <svg
-                                    className="w-4 h-4"
-                                    fill="currentColor"
-                                    viewBox="0 0 20 20"
+                        {/* User Menu */}
+                        {isAuthenticated ? (
+                            <div className="flex items-center space-x-3">
+                                <div className="hidden md:flex items-center space-x-2 px-3 py-2 bg-gray-100 rounded-lg">
+                                    <User size={16} className="text-gray-600" />
+                                    <span className="text-sm font-medium text-gray-700">
+                                        {userName || "User"}
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={logout}
+                                    className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
                                 >
-                                    <path
-                                        fillRule="evenodd"
-                                        d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                                        clipRule="evenodd"
-                                    />
-                                </svg>
+                                    <LogOut size={16} />
+                                    <span className="hidden sm:inline text-sm font-medium">Logout</span>
+                                </button>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="flex items-center space-x-2">
+                                <Link
+                                    to="/login"
+                                    className="px-4 py-2 text-primary-600 hover:text-primary-700 font-medium transition-colors"
+                                >
+                                    Login
+                                </Link>
+                                <Link
+                                    to="/signup"
+                                    className="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-medium transition-colors"
+                                >
+                                    Sign Up
+                                </Link>
+                            </div>
+                        )}
 
                         {/* Mobile Menu Button */}
                         <button
@@ -136,26 +150,40 @@ export default function NavBar() {
                 <div className="md:hidden border-t border-gray-200 bg-white">
                     <div className="px-4 py-3 space-y-2">
                         {/* Mobile Navigation Links */}
-                        {navLinks.map(
-                            ({ path, label, icon: Icon, adminOnly }) => {
-                                if (adminOnly && role !== "Admin") return null;
-
-                                return (
-                                    <Link
-                                        key={path}
-                                        to={path}
-                                        onClick={() => setMobileMenuOpen(false)}
-                                        className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                            isActive(path)
-                                                ? "bg-primary-500 text-white"
-                                                : "text-gray-700 hover:bg-primary-50"
-                                        }`}
-                                    >
-                                        <Icon size={18} />
-                                        <span>{label}</span>
-                                    </Link>
-                                );
-                            }
+                        {isAdmin ? (
+                            // Admin mobile navigation
+                            adminNavLinks.map(({ path, label, icon: Icon }) => (
+                                <Link
+                                    key={path}
+                                    to={path}
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                        isActive(path)
+                                            ? "bg-red-500 text-white"
+                                            : "text-gray-700 hover:bg-red-50"
+                                    }`}
+                                >
+                                    <Icon size={18} />
+                                    <span>{label}</span>
+                                </Link>
+                            ))
+                        ) : (
+                            // Regular user mobile navigation
+                            navLinks.map(({ path, label, icon: Icon }) => (
+                                <Link
+                                    key={path}
+                                    to={path}
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                        isActive(path)
+                                            ? "bg-primary-500 text-white"
+                                            : "text-gray-700 hover:bg-primary-50"
+                                    }`}
+                                >
+                                    <Icon size={18} />
+                                    <span>{label}</span>
+                                </Link>
+                            ))
                         )}
 
                         {/* Mobile Chatbot Button */}
@@ -163,23 +191,44 @@ export default function NavBar() {
                             <ChatbotButton />
                         </div>
 
-                        {/* Mobile Role Selector */}
-                        <div className="pt-2 pb-1">
-                            <label className="block text-xs font-medium text-gray-600 mb-2 px-1">
-                                Your Role
-                            </label>
-                            <select
-                                value={role}
-                                onChange={(e) => setRole(e.target.value)}
-                                className={`w-full appearance-none px-4 py-3 rounded-lg text-sm font-medium cursor-pointer border-2 transition-all duration-200 ${getRoleBadgeClass(
-                                    role
-                                )}`}
-                            >
-                                <option value="Buyer">Buyer</option>
-                                <option value="Seller">Seller</option>
-                                <option value="Admin">Admin</option>
-                            </select>
-                        </div>
+                        {/* Mobile User Menu */}
+                        {isAuthenticated ? (
+                            <div className="pt-2 border-t border-gray-200">
+                                <div className="flex items-center space-x-3 px-4 py-3 bg-gray-100 rounded-lg mb-2">
+                                    <User size={18} className="text-gray-600" />
+                                    <span className="text-sm font-medium text-gray-700">
+                                        {userName || "User"}
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        logout();
+                                        setMobileMenuOpen(false);
+                                    }}
+                                    className="w-full flex items-center space-x-3 px-4 py-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                    <LogOut size={18} />
+                                    <span className="text-sm font-medium">Logout</span>
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="pt-2 border-t border-gray-200 space-y-2">
+                                <Link
+                                    to="/login"
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className="block w-full text-center px-4 py-3 text-primary-600 hover:text-primary-700 font-medium transition-colors"
+                                >
+                                    Login
+                                </Link>
+                                <Link
+                                    to="/signup"
+                                    onClick={() => setMobileMenuOpen(false)}
+                                    className="block w-full text-center px-4 py-3 bg-primary-500 hover:bg-primary-600 text-white rounded-lg font-medium transition-colors"
+                                >
+                                    Sign Up
+                                </Link>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
