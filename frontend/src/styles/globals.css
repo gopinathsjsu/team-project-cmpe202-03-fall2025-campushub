@@ -1,46 +1,8 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
 @tailwind utilities;
-
-/* SJSU Theme Configuration using CSS variables */
-@theme {
-    /* SJSU Colors */
-    --color-sjsu-blue: #0055a2;
-    --color-sjsu-gold: #e5a823;
-    --color-sjsu-dark-blue: #003366;
-    --color-sjsu-light-blue: #336699;
-    --color-sjsu-dark-gold: #cc9900;
-    --color-sjsu-light-gold: #f4d03f;
-
-    /* Primary scale (SJSU Blue) */
-    --color-primary-50: #e6f3ff;
-    --color-primary-100: #b3d9ff;
-    --color-primary-200: #80bfff;
-    --color-primary-300: #4da6ff;
-    --color-primary-400: #1a8cff;
-    --color-primary-500: #0055a2;
-    --color-primary-600: #004080;
-    --color-primary-700: #003366;
-    --color-primary-800: #002654;
-    --color-primary-900: #001a42;
-
-    /* Accent scale (SJSU Gold) */
-    --color-accent-50: #fefbf0;
-    --color-accent-100: #fdf4d1;
-    --color-accent-200: #fbedb3;
-    --color-accent-300: #f9e594;
-    --color-accent-400: #f7de76;
-    --color-accent-500: #e5a823;
-    --color-accent-600: #cc9900;
-    --color-accent-700: #b8850f;
-    --color-accent-800: #a3710c;
-    --color-accent-900: #8f5d0a;
-
-    /* Font family */
-    --font-family-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
-        "Segoe UI", Roboto, sans-serif;
-}
 
 @layer components {
     .btn-primary {
