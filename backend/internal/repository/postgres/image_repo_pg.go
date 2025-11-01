@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/domain"
@@ -71,6 +73,25 @@ func (r *ImageRepoPG) SetPrimary(ctx context.Context, listingID, imageID uuid.UU
 	}
 
 	return tx.Commit(ctx)
+}
+
+// internal/repository/postgres/image_repo_pg.go
+func (r *ImageRepoPG) GetPrimary(ctx context.Context, listingID uuid.UUID) (*domain.ListingImage, error) {
+	var li domain.ListingImage
+	err := r.db.QueryRow(ctx, `
+        SELECT id, listing_id, s3_key, is_primary, width, height, created_at
+        FROM listing_images
+        WHERE listing_id=$1
+        ORDER BY is_primary DESC, created_at ASC
+        LIMIT 1
+    `, listingID).Scan(&li.ID, &li.ListingID, &li.S3Key, &li.IsPrimary, &li.Width, &li.Height, &li.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &li, nil
 }
 
 func (r *ImageRepoPG) Delete(ctx context.Context, imageID uuid.UUID) error {
