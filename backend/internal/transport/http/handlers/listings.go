@@ -3,23 +3,51 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/domain"
+	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/platform/s3client"
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/repository"
 	resp "github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/resp"
 )
 
 type ListingsHandler struct {
-	repo repository.ListingRepo
-	v    *validator.Validate
+	repo   repository.ListingRepo
+	images repository.ImageRepo
+	s3     *s3client.Client
+	v      *validator.Validate
+	expiry time.Duration
 }
 
-func NewListingsHandler(repo repository.ListingRepo, v *validator.Validate) *ListingsHandler {
-	return &ListingsHandler{repo: repo, v: v}
+type listingWithImage struct {
+	domain.Listing `json:",inline"`
+	PrimaryImage   *struct {
+		Key string `json:"key"`
+		URL string `json:"url"`
+	} `json:"primaryImage,omitempty"`
+}
+
+func NewListingsHandler(
+	repo repository.ListingRepo,
+	images repository.ImageRepo,
+	s3 *s3client.Client,
+	v *validator.Validate,
+	expiryMinutes int,
+) *ListingsHandler {
+	if expiryMinutes <= 0 {
+		expiryMinutes = 15
+	}
+	return &ListingsHandler{
+		repo:   repo,
+		images: images,
+		s3:     s3,
+		v:      v,
+		expiry: time.Duration(expiryMinutes) * time.Minute,
+	}
 }
 
 type createListingReq struct {
@@ -67,7 +95,20 @@ func (h *ListingsHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, resp.Err("NOT_FOUND", "listing not found", nil))
 		return
 	}
-	c.JSON(http.StatusOK, resp.Data(l))
+
+	out := listingWithImage{Listing: l}
+	if h.images != nil && h.s3 != nil {
+		if img, err := h.images.GetPrimary(c.Request.Context(), id); err == nil && img != nil {
+			if url, err := h.s3.PresignGet(c.Request.Context(), img.S3Key, h.expiry); err == nil {
+				out.PrimaryImage = &struct {
+					Key string `json:"key"`
+					URL string `json:"url"`
+				}{Key: img.S3Key, URL: url}
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, resp.Data(out))
 }
 
 func (h *ListingsHandler) List(c *gin.Context) {
@@ -109,8 +150,24 @@ func (h *ListingsHandler) List(c *gin.Context) {
 		return
 	}
 
+	out := make([]listingWithImage, 0, len(items))
+	for _, l := range items {
+		lw := listingWithImage{Listing: l}
+		if h.images != nil && h.s3 != nil {
+			if img, err := h.images.GetPrimary(c.Request.Context(), l.ID); err == nil && img != nil {
+				if url, err := h.s3.PresignGet(c.Request.Context(), img.S3Key, h.expiry); err == nil {
+					lw.PrimaryImage = &struct {
+						Key string `json:"key"`
+						URL string `json:"url"`
+					}{Key: img.S3Key, URL: url}
+				}
+			}
+		}
+		out = append(out, lw)
+	}
+
 	c.JSON(http.StatusOK, resp.Data(gin.H{
-		"items":  items,
+		"items":  out,
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,

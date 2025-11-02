@@ -42,6 +42,7 @@ func (h *UploadsHandler) Presign(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, resp.Err("VALIDATION_ERROR", "invalid fields", err.Error()))
 		return
 	}
+
 	ext := strings.ToLower(filepath.Ext(req.FileName))
 	uid := uuid.New().String()
 	key := fmt.Sprintf("uploads/%s/%s%s", time.Now().Format("2006/01"), uid, ext)
@@ -70,6 +71,11 @@ func (h *UploadsHandler) Complete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, resp.Err("VALIDATION_ERROR", "invalid fields", err.Error()))
 		return
 	}
+	if ok, err := h.s3.HeadObjectExists(c.Request.Context(), req.Key); err != nil || !ok {
+		c.JSON(http.StatusBadRequest, resp.Err("VALIDATION_ERROR", "object not found in bucket", nil))
+		return
+	}
+
 	img, err := h.imgRepo.Add(c, repository.AddImage{
 		ListingID: req.ListingID,
 		S3Key:     req.Key,
@@ -80,4 +86,27 @@ func (h *UploadsHandler) Complete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp.Data(img))
+}
+
+type signGetReq struct {
+	Key string `json:"key" validate:"required"`
+}
+
+func (h *UploadsHandler) SignGet(c *gin.Context) {
+	var req signGetReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, resp.Err("VALIDATION_ERROR", "invalid json", err.Error()))
+		return
+	}
+	if err := h.v.Struct(req); err != nil {
+		c.JSON(http.StatusBadRequest, resp.Err("VALIDATION_ERROR", "invalid fields", err.Error()))
+		return
+	}
+
+	url, err := h.s3.PresignGet(c.Request.Context(), req.Key, h.expiry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, resp.Err("INTERNAL", "presign get failed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, resp.Data(gin.H{"url": url}))
 }
