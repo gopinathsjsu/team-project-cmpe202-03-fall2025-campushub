@@ -9,14 +9,17 @@ import (
 )
 
 func main() {
+
 	log, _ := zap.NewProduction()
 	defer log.Sync()
 
+	// Load config
 	_, err := config.Load()
 	if err != nil {
 		log.Fatal("config load failed", zap.Error(err))
 	}
 
+	// Worker logic here (e.g., processing jobs from a queue)
 	log.Info("worker started: idle (add thumbnail/cleanup jobs here)")
 	for {
 		time.Sleep(30 * time.Second)

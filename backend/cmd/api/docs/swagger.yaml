@@ -1,0 +1,317 @@
+definitions:
+  domain.Condition:
+    enum:
+    - New
+    - LikeNew
+    - Good
+    - Fair
+    type: string
+    x-enum-varnames:
+    - CondNew
+    - CondLikeNew
+    - CondGood
+    - CondFair
+  domain.ListingStatus:
+    enum:
+    - active
+    - sold
+    - removed
+    type: string
+    x-enum-varnames:
+    - ListingActive
+    - ListingSold
+    - ListingRemoved
+  handlers.CreateListingReq:
+    properties:
+      category:
+        maxLength: 60
+        minLength: 2
+        type: string
+      condition:
+        allOf:
+        - $ref: '#/definitions/domain.Condition'
+        enum:
+        - New
+        - LikeNew
+        - Good
+        - Fair
+      description:
+        minLength: 5
+        type: string
+      price:
+        minimum: 0
+        type: number
+      sellerId:
+        type: string
+      title:
+        maxLength: 120
+        minLength: 3
+        type: string
+    required:
+    - category
+    - condition
+    - description
+    - price
+    - sellerId
+    - title
+    type: object
+  handlers.UpdateListingReq:
+    properties:
+      category:
+        type: string
+      condition:
+        allOf:
+        - $ref: '#/definitions/domain.Condition'
+        enum:
+        - New
+        - LikeNew
+        - Good
+        - Fair
+      description:
+        type: string
+      price:
+        minimum: 0
+        type: number
+      status:
+        allOf:
+        - $ref: '#/definitions/domain.ListingStatus'
+        enum:
+        - active
+        - sold
+        - removed
+      title:
+        type: string
+    type: object
+  resp.APIError:
+    properties:
+      code:
+        type: string
+      details: {}
+      message:
+        type: string
+    type: object
+  resp.Response:
+    properties:
+      data: {}
+      error:
+        $ref: '#/definitions/resp.APIError'
+    type: object
+info:
+  contact: {}
+paths:
+  /listings:
+    get:
+      parameters:
+      - description: Search query
+        in: query
+        name: q
+        type: string
+      - description: Category
+        in: query
+        name: category
+        type: string
+      - default: active
+        description: active|sold|removed
+        in: query
+        name: status
+        type: string
+      - default: created_desc
+        description: created_desc|price_asc|price_desc
+        in: query
+        name: sort
+        type: string
+      - description: Min price
+        in: query
+        name: priceMin
+        type: number
+      - description: Max price
+        in: query
+        name: priceMax
+        type: number
+      - default: 20
+        description: Limit (1-100)
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Offset
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/resp.Response'
+      summary: List listings
+      tags:
+      - listings
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Listing
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateListingReq'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/resp.Response'
+      security:
+      - BearerAuth: []
+      summary: Create listing
+      tags:
+      - listings
+  /listings/{id}:
+    delete:
+      parameters:
+      - description: Listing ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/resp.Response'
+      security:
+      - BearerAuth: []
+      summary: Delete listing (soft)
+      tags:
+      - listings
+    get:
+      parameters:
+      - description: Listing ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/resp.Response'
+      summary: Get listing by ID
+      tags:
+      - listings
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Listing ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Partial Listing
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UpdateListingReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/resp.Response'
+      security:
+      - BearerAuth: []
+      summary: Update listing (partial)
+      tags:
+      - listings
+  /listings/{id}/mark-sold:
+    post:
+      parameters:
+      - description: Listing ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/resp.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/resp.Response'
+      security:
+      - BearerAuth: []
+      summary: Mark listing sold
+      tags:
+      - listings
+swagger: "2.0"

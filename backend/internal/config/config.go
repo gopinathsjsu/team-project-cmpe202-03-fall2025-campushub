@@ -8,9 +8,9 @@ import (
 
 type Config struct {
 	Env           string `mapstructure:"ENV"`
-	HTTPPort      string `mapstructure:"PORT"`    // api port
-	WSPort        string `mapstructure:"WS_PORT"` // ws port
-	DBDSN         string `mapstructure:"DB_DSN"`  // postgres dsn
+	HTTPPort      string `mapstructure:"PORT"`
+	WSPort        string `mapstructure:"WS_PORT"`
+	DBDSN         string `mapstructure:"DB_DSN"`
 	JWTSecret     string `mapstructure:"JWT_SECRET"`
 	S3Bucket      string `mapstructure:"S3_BUCKET"`
 	S3Region      string `mapstructure:"S3_REGION"`

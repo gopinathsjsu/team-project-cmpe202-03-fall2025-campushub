@@ -2,12 +2,14 @@ package s3client
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
 	awsV2 "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type Client struct {
@@ -80,6 +82,35 @@ func (c *Client) PresignPut(ctx context.Context, key, contentType string, expire
 		}
 	}
 	return PresignPut{URL: req.URL, Headers: h, Key: key}, nil
+}
+
+func (c *Client) PresignGet(ctx context.Context, key string, expires time.Duration) (string, error) {
+	ps := s3.NewPresignClient(c.s3, func(po *s3.PresignOptions) { po.Expires = expires })
+	req, err := ps.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: &c.bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return "", err
+	}
+	return req.URL, nil
+}
+
+// internal/platform/s3client/s3client.go
+func (c *Client) HeadObjectExists(ctx context.Context, key string) (bool, error) {
+	_, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &c.bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		var nfe *types.NotFound
+		if errors.As(err, &nfe) {
+			return false, nil
+		}
+		// For AWS SDK v2, also treat 404s as not found
+		return false, err
+	}
+	return true, nil
 }
 
 func (c *Client) Bucket() string { return c.bucket }

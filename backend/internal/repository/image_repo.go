@@ -12,6 +12,7 @@ type ImageRepo interface {
 	ListByListing(ctx context.Context, listingID uuid.UUID) ([]domain.ListingImage, error)
 	SetPrimary(ctx context.Context, listingID, imageID uuid.UUID) error
 	Delete(ctx context.Context, imageID uuid.UUID) error
+	GetPrimary(ctx context.Context, listingID uuid.UUID) (*domain.ListingImage, error)
 }
 
 type AddImage struct {
