@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -12,7 +12,10 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
+    const location = useLocation();
     const { login } = useAuth();
+
+    const from = location.state?.from?.pathname || "/";
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -20,34 +23,20 @@ export default function LoginPage() {
         setError("");
 
         try {
-            // Check if it's the admin credentials
-            if (formData.email === "devenjaimin.desai@sjsu.edu" && formData.password === "Deven@12345") {
-                login("admin", formData.email, "Admin User");
-                navigate("/admin");
+            const result = await login(formData.email, formData.password);
+            
+            if (result.success) {
+                // Redirect based on user role
+                if (result.user.role === "admin") {
+                    navigate("/admin");
+                } else {
+                    navigate(from, { replace: true });
+                }
             } else {
-                // For demo purposes, check if user exists in localStorage
-                const existingUsers = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-                const userExists = existingUsers.find(user => user.email === formData.email);
-                
-                if (!userExists) {
-                    setError("User not found! Please sign up first to create your account, then you can login.");
-                    setLoading(false);
-                    return;
-                }
-                
-                // Check password (in a real app, this would be hashed)
-                if (userExists.password !== formData.password) {
-                    setError("Invalid password. Please try again.");
-                    setLoading(false);
-                    return;
-                }
-                
-                // Authenticate existing user
-                login("user", formData.email, userExists.name);
-                navigate("/browse");
+                setError(result.error || "Login failed. Please try again.");
             }
         } catch (err) {
-            setError("Invalid credentials. Please try again.");
+            setError("An unexpected error occurred. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -58,6 +47,7 @@ export default function LoginPage() {
             ...formData,
             [e.target.name]: e.target.value
         });
+        if (error) setError("");
     };
 
     return (

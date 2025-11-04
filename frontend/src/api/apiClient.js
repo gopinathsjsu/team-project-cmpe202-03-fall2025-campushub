@@ -1,7 +1,7 @@
 // src/api/apiClient.js
 import mockApi from "./mockApi";
 
-const USE_MOCK = true; // flip false when backend is ready
+const USE_MOCK = false; // flip false when backend is ready
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
 
 const getAuthToken = () => {
@@ -73,8 +73,26 @@ const api = {
     setAuthToken(null);
   },
 
+  async login(email, password) {
+    if (USE_MOCK) return mockApi.login(email, password);
+    
+    return fetchAPI("/auth/sign-in", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  async register(name, email, password, role = "user") {
+    if (USE_MOCK) return mockApi.register(name, email, password, role);
+    
+    return fetchAPI("/auth/sign-up", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password, role }),
+    });
+  },
+
    // ==================== Listings ====================
-   
+
   async listListings(params = {}) {
     if (USE_MOCK) return mockApi.listListings(params);
     const queryParams = new URLSearchParams();

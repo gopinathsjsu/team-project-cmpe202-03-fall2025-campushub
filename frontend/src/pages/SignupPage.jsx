@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, CheckCircle } from "lucide-react";
@@ -9,14 +10,15 @@ export default function SignupPage() {
         lastName: "",
         email: "",
         password: "",
-        confirmPassword: ""
+        confirmPassword: "",
+        role: "buyer"
     });
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
-    const { login } = useAuth();
+    const { register } = useAuth();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -30,43 +32,39 @@ export default function SignupPage() {
             return;
         }
 
-        if (formData.password.length < 6) {
-            setError("Password must be at least 6 characters long");
+        if (formData.password.length < 8) {
+            setError("Password must be at least 8 characters long");
             setLoading(false);
             return;
         }
 
-        if (!formData.email.includes("@campus.edu")) {
-            setError("Please use your campus email address");
+        if (!formData.email.endsWith("@sjsu.edu") && !formData.email.endsWith("@campus.edu")) {
+            setError("Please use your campus email address (@sjsu.edu or @campus.edu)");
             setLoading(false);
             return;
         }
 
         try {
-            // Store user information in localStorage for future logins
-            const existingUsers = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-            const newUser = {
-                email: formData.email,
-                name: `${formData.firstName} ${formData.lastName}`,
-                password: formData.password // In a real app, this would be hashed
-            };
-            
-            // Check if user already exists
-            if (existingUsers.find(user => user.email === formData.email)) {
-                setError("User with this email already exists. Please login instead.");
-                setLoading(false);
-                return;
+            const fullName = `${formData.firstName} ${formData.lastName}`.trim();
+            const result = await register(
+                fullName,
+                formData.email,
+                formData.password,
+                formData.role
+            );
+
+            if (result.success) {
+                // Redirect based on role
+                if (result.user.role === "admin") {
+                    navigate("/admin");
+                } else {
+                    navigate("/");
+                }
+            } else {
+                setError(result.error || "Registration failed. Please try again.");
             }
-            
-            // Add new user to the list
-            existingUsers.push(newUser);
-            localStorage.setItem("registeredUsers", JSON.stringify(existingUsers));
-            
-            // Authenticate the new user
-            login("user", formData.email, newUser.name);
-            navigate("/browse");
         } catch (err) {
-            setError("Failed to create account. Please try again.");
+            setError("An unexpected error occurred. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -77,11 +75,16 @@ export default function SignupPage() {
             ...formData,
             [e.target.name]: e.target.value
         });
+        if (error) setError("");
     };
 
     const passwordRequirements = [
-        { text: "At least 6 characters", met: formData.password.length >= 6 },
-        { text: "Passwords match", met: formData.password === formData.confirmPassword && formData.confirmPassword.length > 0 }
+        { text: "At least 8 characters", met: formData.password.length >= 8 },
+        { text: "Passwords match", met: formData.password === formData.confirmPassword && formData.confirmPassword.length > 0 },
+         {
+            text: "Campus email (@sjsu.edu)",
+            met: formData.email.endsWith("@sjsu.edu") || formData.email.endsWith("@campus.edu")
+        }
     ];
 
     return (

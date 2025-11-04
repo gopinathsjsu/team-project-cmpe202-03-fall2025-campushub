@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 // src/context/AuthContext.jsx
 import { createContext, useContext, useState, useMemo, useEffect } from "react";
+import api from "../api/apiClient";
 
 const AuthContext = createContext(null);
 export function useAuth() {
@@ -9,62 +10,108 @@ export function useAuth() {
 
 export function AuthProvider({ children }) {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const [userRole, setUserRole] = useState("user"); // user | admin
-    const [userEmail, setUserEmail] = useState("");
-    const [userName, setUserName] = useState("");
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
 
     // Check for existing authentication on mount
     useEffect(() => {
-        const authStatus = localStorage.getItem("isAuthenticated");
-        const role = localStorage.getItem("userRole");
-        const email = localStorage.getItem("userEmail");
-        const name = localStorage.getItem("userName");
+        const initAuth = async () => {
+            const token = api.getToken();
+            
+            if (token) {
+                try {
+                    // Verify token is still valid by getting user data
+                    const userData = JSON.parse(localStorage.getItem("user") || "null");
+                    
+                    if (userData) {
+                        setIsAuthenticated(true);
+                        setUser(userData);
+                    } else {
+                        // Token exists but no user data, clear everything
+                        api.logout();
+                    }
+                } catch (error) {
+                    console.error("Failed to restore session:", error);
+                    api.logout();
+                }
+            }
+            
+            setLoading(false);
+        };
 
-        if (authStatus === "true") {
-            setIsAuthenticated(true);
-            setUserRole(role || "user");
-            setUserEmail(email || "");
-            setUserName(name || "");
-        }
+        initAuth();
     }, []);
 
-    const login = (role, email, name = "") => {
-        console.log("Logging in user:", { role, email, name });
-        setIsAuthenticated(true);
-        setUserRole(role);
-        setUserEmail(email);
-        setUserName(name);
-        
-        localStorage.setItem("isAuthenticated", "true");
-        localStorage.setItem("userRole", role);
-        localStorage.setItem("userEmail", email);
-        if (name) localStorage.setItem("userName", name);
-        console.log("User logged in successfully");
+    const login = async (email, password) => {
+        try {
+            const response = await api.login(email, password);
+            
+            api.setToken(response.data.token);
+          
+            const userData = response.data.user;
+            setUser(userData);
+            setIsAuthenticated(true);
+            
+            localStorage.setItem("user", JSON.stringify(userData));
+            
+            return { success: true, user: userData };
+        } catch (error) {
+            console.error("Login failed:", error);
+            return { 
+                success: false, 
+                error: error.message || "Login failed. Please check your credentials." 
+            };
+        }
+    };
+
+    const register = async (name, email, password, role = "user") => {
+        try {
+            const response = await api.register(name, email, password, role);
+            
+            api.setToken(response.data.token);
+           
+            const userData = response.data.user;
+            setUser(userData);
+            setIsAuthenticated(true);
+           
+            localStorage.setItem("user", JSON.stringify(userData));
+            
+            return { success: true, user: userData };
+        } catch (error) {
+            console.error("Registration failed:", error);
+            return { 
+                success: false, 
+                error: error.message || "Registration failed. Please try again." 
+            };
+        }
     };
 
     const logout = () => {
+        api.logout();
         setIsAuthenticated(false);
-        setUserRole("user");
-        setUserEmail("");
-        setUserName("");
-        
-        localStorage.removeItem("isAuthenticated");
-        localStorage.removeItem("userRole");
-        localStorage.removeItem("userEmail");
-        localStorage.removeItem("userName");
+        setUser(null);
+        localStorage.removeItem("user");
     };
 
+    const userRole = user?.role || "user";
+    const userEmail = user?.email || "";
+    const userName = user?.name || "";
+    const userId = user?.id || "";
     const isAdmin = userRole === "admin";
 
     const value = useMemo(() => ({ 
         isAuthenticated, 
+        user,
+        loading,
         userRole, 
         userEmail, 
         userName, 
+        userId,
         isAdmin,
         login, 
-        logout 
-    }), [isAuthenticated, userRole, userEmail, userName, isAdmin]);
+        logout ,
+        register
+    }), [isAuthenticated, user, loading, userRole, userEmail, userName, userId, isAdmin]);
 
     return (
         <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
