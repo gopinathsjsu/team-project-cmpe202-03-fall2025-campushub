@@ -36,6 +36,11 @@ func NewHub(bus *pubsub.Bus, logger *zap.Logger) *Hub {
 	}
 }
 
+// RegisterClient registers a new client with the hub
+func (h *Hub) RegisterClient(client *Client) {
+	h.register <- client
+}
+
 // Run starts the hub's main loop
 func (h *Hub) Run() {
 	// Subscribe to agent responses for all users
@@ -153,18 +158,4 @@ func (h *Hub) BroadcastToUser(userID string, message []byte) error {
 	default:
 		return fmt.Errorf("client send buffer full for user: %s", userID)
 	}
-}
-
-func (h *Hub) Register(c *Client) {
-	h.register <- c
-}
-
-// Unregister removes a client.
-func (h *Hub) Unregister(c *Client) {
-	h.unregister <- c
-}
-
-// PublishAgentRequest lets callers submit an agent query via the bus.
-func (h *Hub) PublishAgentRequest(userID, requestID, query string) {
-	h.publishAgentRequest(userID, requestID, query)
 }

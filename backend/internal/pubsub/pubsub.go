@@ -66,7 +66,3 @@ func (b *Bus) Unsubscribe(topic string, ch chan Message) {
 		}
 	}
 }
-
-
-
-

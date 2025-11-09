@@ -22,7 +22,3 @@ type ListingInfo struct {
 	Category string  `json:"category"`
 	Price    float64 `json:"price"`
 }
-
-
-
-
