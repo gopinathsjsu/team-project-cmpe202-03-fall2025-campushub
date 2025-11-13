@@ -28,6 +28,7 @@ const createHeaders = (includeAuth = false, contentType = "application/json") =>
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
+    console.log(token);
   }
   
   return headers;
@@ -152,6 +153,78 @@ const api = {
       auth: true,
       body: JSON.stringify({ reason }),
     });
+  },
+
+  // ==================== Image Uploads ====================
+
+  /**
+   * Step 1: Get presigned URL for S3 upload
+  
+   */
+  async presignUpload(fileName, contentType) {    
+    return fetchAPI("/uploads/presign", {
+      method: "POST",
+      body: JSON.stringify({ fileName, contentType }),
+    });
+  },
+
+  /**
+   * Step 2: Upload file to S3 using presigned URL
+   */
+  async uploadToS3(presignedUrl, file, contentType) {
+    
+    const response = await fetch(presignedUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": contentType,
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to upload to S3");
+    }
+
+    return { success: true };
+  },
+
+  /**
+   * Step 3: Complete upload and attach to listing
+   */
+  async completeUpload(listingId, key, isPrimary = false) {
+    console.log(listingId);
+    
+    return fetchAPI("/uploads/complete", {
+      method: "POST",
+      body: JSON.stringify({ listingId, key, isPrimary }),
+    });
+  },
+
+  async uploadImage(listingId, file, isPrimary = false) {
+    try {
+      // Step 1: Get presigned URL
+      const { data: presignData } = await this.presignUpload(file.name, file.type);
+      
+      // Step 2: Upload to S3
+      await this.uploadToS3(presignData.url, file, file.type);
+      
+      // Step 3: Complete and attach to listing
+      const result = await this.completeUpload(listingId, presignData.key, isPrimary);
+      
+      return result.data;
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      throw error;
+    }
+  },
+
+  /** List images for a listing */
+  async listImages(listingId) {
+    if (USE_MOCK) {
+      return { data: [] };
+    }
+    
+    return fetchAPI(`/listings/${listingId}/images`);
   },
 
   // ==================== AI Chatbot ====================

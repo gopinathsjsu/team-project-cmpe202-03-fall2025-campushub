@@ -29,8 +29,8 @@ export default function BrowsePage() {
             const res = await api.listListings({
                 q,
                 category: category !== "All" ? category : undefined,
-                minPrice: minPrice || undefined,
-                maxPrice: maxPrice || undefined,
+                priceMin: minPrice || undefined,
+                priceMax: maxPrice || undefined,
                 limit: ITEMS_PER_PAGE,
                 offset: offset,
                 sort: "created_desc",
