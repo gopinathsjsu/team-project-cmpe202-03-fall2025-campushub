@@ -41,20 +41,17 @@ func NewRouter(d Deps) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Recovery(), gin.Logger())
 
-	// CORS (dev friendly)
-	if d.Env != "prod" {
-		r.Use(func(c *gin.Context) {
-			c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
-			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			c.Header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
-			if c.Request.Method == "OPTIONS" {
-				c.AbortWithStatus(204)
-				return
-			}
-			c.Next()
-		})
-	}
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "http://localhost:5137")
+		c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
 
 	r.GET("/healthz", func(c *gin.Context) { c.String(200, "ok") })
 
@@ -74,10 +71,6 @@ func NewRouter(d Deps) *gin.Engine {
 	if d.AdminSvc != nil {
 		adm = handlers.NewAdminHandler(d.AdminSvc)
 	}
-	// var ch *handlers.ChatHandler
-	// if d.ChatSvc != nil {
-	// 	ch = handlers.NewChatHandler(d.ChatSvc, d.Validate)
-	// }
 
 	// Routes
 	v1 := r.Group("/v1")
@@ -87,18 +80,19 @@ func NewRouter(d Deps) *gin.Engine {
 			v1.POST("/auth/sign-in", ah.SignIn)
 		}
 
-		v1.GET("/listings", lh.List)
-		v1.GET("/listings/:id", lh.Get)
+		v1.GET("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.List)
+		v1.GET("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Get)
 		v1.POST("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Create)
 		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Update)
 		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.MarkSold)
 		v1.DELETE("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Delete)
+		v1.GET("/listings/mine", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.ListMine)
 
-		v1.POST("/uploads/presign", uh.Presign)
-		v1.POST("/uploads/complete", uh.Complete)
+		v1.POST("/uploads/presign", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Presign)
+		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Complete)
 
 		if rh != nil {
-			v1.POST("/reports", rh.Create)
+			v1.POST("/reports", middleware.JWT(d.JWTSecret, "seller", "admin"), rh.Create)
 			v1.GET("/reports", middleware.JWT(d.JWTSecret, "admin"), rh.List)
 			v1.PATCH("/reports/:id/status", middleware.JWT(d.JWTSecret, "admin"), rh.UpdateStatus)
 		}
@@ -109,14 +103,6 @@ func NewRouter(d Deps) *gin.Engine {
 			v1.POST("/admin/listings/:id/remove", middleware.JWT(d.JWTSecret, "admin"), adm.ForceRemoveListing)
 		}
 
-		// chat
-		// if ch != nil {
-		// 	v1.POST("/conversations", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), ch.CreateConversation)
-		// 	v1.GET("/conversations", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), ch.ListConversations)         // ?userId=
-		// 	v1.GET("/conversations/:id/messages", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), ch.ListMessages) // ?userId=
-		// 	v1.POST("/conversations/:id/messages", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), ch.SendMessage)
-		// 	v1.POST("/conversations/:id/read", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), ch.MarkRead)
-		// }
 	}
 
 	return r

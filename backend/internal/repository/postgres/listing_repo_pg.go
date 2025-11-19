@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,11 @@ func (r *ListingRepoPG) List(ctx context.Context, p repository.ListParams) ([]do
 	where = append(where, "status = COALESCE(NULLIF($1,''),'active')")
 	args = append(args, p.Status)
 	i++
+	if p.SellerID != nil {
+		where = append(where, "seller_id = $"+strconv.Itoa(i))
+		args = append(args, *p.SellerID)
+		i++
+	}
 	if p.Category != "" {
 		where = append(where, fmt.Sprintf("category = $%d", i))
 		args = append(args, p.Category)

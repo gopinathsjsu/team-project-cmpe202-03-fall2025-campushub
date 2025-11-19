@@ -12,6 +12,8 @@ type Config struct {
 	WSPort        string `mapstructure:"WS_PORT"`
 	DBDSN         string `mapstructure:"DB_DSN"`
 	JWTSecret     string `mapstructure:"JWT_SECRET"`
+	OpenAIKey     string `mapstructure:"OPENAI_API_KEY"` // Also used for Gemini API key
+	GeminiKey     string `mapstructure:"GEMINI_API_KEY"` // Alternative: use this for Gemini
 	S3Bucket      string `mapstructure:"S3_BUCKET"`
 	S3Region      string `mapstructure:"S3_REGION"`
 	S3Endpoint    string `mapstructure:"S3_ENDPOINT"`

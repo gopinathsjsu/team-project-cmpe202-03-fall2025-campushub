@@ -16,6 +16,7 @@ type ListParams struct {
 	Limit    int
 	Offset   int
 	Sort     string
+	SellerID *uuid.UUID
 }
 
 type ListingRepo interface {
