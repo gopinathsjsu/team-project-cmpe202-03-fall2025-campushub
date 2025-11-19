@@ -9,7 +9,9 @@ import {
     MessageCircle,
     Shield,
     Store,
+    Sparkles,
     LogOut,
+    Package,
     User,
 } from "lucide-react";
 import ChatbotButton from "./ChatbotButton";
@@ -24,6 +26,7 @@ export default function NavBar() {
     const navLinks = [
         { path: "/browse", label: "Browse", icon: ShoppingBag },
         { path: "/sell", label: "Sell", icon: Store },
+        { path: "/my-listings", label: "My Listings", icon: Package },
         { path: "/chat", label: "Chat", icon: MessageCircle },
     ];
 
@@ -47,7 +50,7 @@ export default function NavBar() {
                                 CampusHub
                             </div>
                             <div className="text-[10px] text-accent-600 font-medium -mt-1">
-                                Campus Marketplace
+                                SJSU Marketplace
                             </div>
                         </div>
                     </Link>

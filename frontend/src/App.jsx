@@ -11,6 +11,7 @@ import SellPage from "./pages/SellPage";
 import ListingDetailPage from "./pages/ListingDetailPage";
 import ChatPage from "./pages/ChatPage";
 import AdminPage from "./pages/AdminPage";
+import MyListingsPage from "./pages/MyListingsPage";
 
 // Protected Route Component
 function ProtectedRoute({ children, requireAdmin = false }) {
@@ -72,6 +73,12 @@ function AppContent() {
             <ListingDetailPage />
           </ProtectedRoute>
         } />
+        <Route path="/my-listings" element={
+          <ProtectedRoute>
+            <MyListingsPage />
+          </ProtectedRoute>
+        } 
+      />
         <Route path="/chat" element={
           <ProtectedRoute>
             <ChatPage />
