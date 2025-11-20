@@ -1,68 +1,79 @@
 package ws
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
-// EventType constants
+// Event types
 const (
-	EventTypeAgentSearch   = "agent.search"
-	EventTypeAgentResponse = "agent.response"
+	EventTypeAgentSearch   = "agent.search"   // existing structured search
+	EventTypeAgentResponse = "agent.response" // existing structured response
+	EventTypeChatMessage   = "chat.message"   // NEW: free-form chat input
+	EventTypeChatResponse  = "chat.response"  // NEW: chat output (answer + optional results)
 	EventTypeError         = "error"
 )
 
-// Event is the base structure for all WebSocket messages
 type Event struct {
 	Type      string          `json:"type"`
 	RequestID string          `json:"requestId"`
 	Payload   json.RawMessage `json:"payload"`
 }
 
-// AgentSearchPayload is sent by clients to search listings via AI
+// -------- agent (unchanged) --------
+
 type AgentSearchPayload struct {
 	Query string `json:"query"`
 }
 
-// AgentResponsePayload is sent to clients with search results
+type PrimaryImage struct {
+	Key string `json:"key"`
+	URL string `json:"url"`
+}
+
+type ListingInfo struct {
+	ID           string        `json:"id"`
+	SellerID     string        `json:"sellerId"`
+	Title        string        `json:"title"`
+	Description  string        `json:"description"`
+	Category     string        `json:"category"`
+	Price        float64       `json:"price"`
+	Condition    string        `json:"condition"`
+	Status       string        `json:"status"`
+	CreatedAt    string        `json:"createdAt"`
+	UpdatedAt    string        `json:"updatedAt"`
+	PrimaryImage *PrimaryImage `json:"primaryImage,omitempty"`
+}
+
 type AgentResponsePayload struct {
 	Answer  string        `json:"answer"`
 	Results []ListingInfo `json:"results"`
 }
 
-// ListingInfo contains minimal listing data
-type ListingInfo struct {
-	ID       string  `json:"id"`
-	Title    string  `json:"title"`
-	Category string  `json:"category"`
-	Price    float64 `json:"price"`
+// -------- chat (new) --------
+
+type ChatMessagePayload struct {
+	Text string `json:"text"`
 }
 
-// ErrorPayload is sent when an error occurs
+type ChatResponsePayload struct {
+	Answer  string        `json:"answer"`
+	Results []ListingInfo `json:"results,omitempty"`
+}
+
+// -------- errors / helpers --------
+
 type ErrorPayload struct {
 	Message string `json:"message"`
 	Code    string `json:"code,omitempty"`
 }
 
-// NewEvent creates a new event with the given type and payload
 func NewEvent(eventType, requestID string, payload interface{}) ([]byte, error) {
-	payloadBytes, err := json.Marshal(payload)
+	b, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-
-	event := Event{
-		Type:      eventType,
-		RequestID: requestID,
-		Payload:   payloadBytes,
-	}
-
-	return json.Marshal(event)
+	ev := Event{Type: eventType, RequestID: requestID, Payload: b}
+	return json.Marshal(ev)
 }
 
-// NewErrorEvent creates an error event
 func NewErrorEvent(requestID, message, code string) ([]byte, error) {
-	return NewEvent(EventTypeError, requestID, ErrorPayload{
-		Message: message,
-		Code:    code,
-	})
+	return NewEvent(EventTypeError, requestID, ErrorPayload{Message: message, Code: code})
 }

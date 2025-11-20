@@ -8,24 +8,200 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/domain"
+	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/platform/s3client"
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/pubsub"
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/repository"
 	"go.uber.org/zap"
 )
 
-// Using v1 API with gemini-1.5-flash (faster and cheaper than gemini-pro)
-// Note: REST API requires "models/" prefix in URL, but SDK doesn't
+// Using v1 API with gemini-2.5-flash
 const geminiURL = "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent"
+
 // AgentService handles AI-powered search queries
 type AgentService struct {
-	apiKey       string
-	listingsRepo repository.ListingRepo
-	logger       *zap.Logger
+	apiKey        string
+	listingsRepo  repository.ListingRepo
+	imagesRepo    repository.ImageRepo // for primary image lookup
+	s3            *s3client.Client     // for presign
+	expiryMinutes int                  // presign expiry
+	logger        *zap.Logger
 }
 
-// NewAgentService creates a new agent service
+// expandKeywords adds variants like "cmpe 202" / "cmpe-202" for tokens such as "cmpe202".
+func expandKeywords(src []string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	add := func(s string) {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, tok := range src {
+		add(tok)
+		t := strings.ToLower(strings.TrimSpace(tok))
+		if t == "" {
+			continue
+		}
+		collapsed := strings.ReplaceAll(strings.ReplaceAll(t, " ", ""), "-", "")
+		alpha, numeric := splitAlphaNumeric(collapsed)
+		if alpha != "" && numeric != "" {
+			add(alpha + numeric)       // cmpe202
+			add(alpha + " " + numeric) // cmpe 202
+			add(alpha + "-" + numeric) // cmpe-202
+		}
+	}
+	return out
+}
+func splitAlphaNumeric(s string) (alpha, numeric string) {
+	i := -1
+	for idx, r := range s {
+		if r >= '0' && r <= '9' {
+			i = idx
+			break
+		}
+	}
+	if i <= 0 || i >= len(s)-1 {
+		return "", ""
+	}
+	alpha, numeric = s[:i], s[i:]
+	for _, r := range alpha {
+		if r < 'a' || r > 'z' {
+			return "", ""
+		}
+	}
+	for _, r := range numeric {
+		if r < '0' || r > '9' {
+			return "", ""
+		}
+	}
+	return
+}
+
+// searchListingsWithRetries tries multiple Q variants and relaxes filters if needed.
+func (s *AgentService) searchListingsWithRetries(ctx context.Context, intent *SearchIntent) ([]domain.Listing, error) {
+	base := repository.ListParams{
+		Category: intent.Category,
+		PriceMin: intent.MinPrice,
+		PriceMax: intent.MaxPrice,
+		Status:   "active",
+		Limit:    10,
+		Offset:   0,
+		Sort:     "created_desc",
+	}
+	var variants []string
+	if len(intent.Keywords) > 0 {
+		variants = append(variants, strings.Join(expandKeywords(intent.Keywords), " "))
+		variants = append(variants, strings.Join(intent.Keywords, " "))
+	}
+	variants = append(variants, "")
+
+	type attempt struct {
+		p      repository.ListParams
+		reason string
+	}
+	var tries []attempt
+
+	// A: category + q variants
+	for _, q := range variants {
+		p := base
+		p.Q = q
+		tries = append(tries, attempt{p, "category+q"})
+	}
+	// B: drop category
+	for _, q := range variants {
+		p := base
+		p.Category = ""
+		p.Q = q
+		tries = append(tries, attempt{p, "q-only"})
+	}
+	// C: broad
+	tries = append(tries, attempt{base, "broad-no-q-no-category"})
+	tries[len(tries)-1].p.Category = ""
+	tries[len(tries)-1].p.Q = ""
+
+	for _, t := range tries {
+		s.logger.Info("chat search attempt",
+			zap.String("reason", t.reason),
+			zap.String("q", t.p.Q),
+			zap.String("category", t.p.Category),
+			zap.Any("min", t.p.PriceMin), zap.Any("max", t.p.PriceMax),
+		)
+		items, _, err := s.listingsRepo.List(ctx, t.p)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) > 0 {
+			return items, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *AgentService) ProcessChat(ctx context.Context, text string) (string, []pubsub.ListingInfo, error) {
+	t := strings.TrimSpace(text)
+	l := strings.ToLower(t)
+
+	// Very light small-talk router
+	if isGreeting(l) {
+		return "Hey! 👋 What are you looking for today? You can say things like “used CMPE 202 textbook under $40”.", nil, nil
+	}
+	if isThanks(l) {
+		return "You’re welcome! If you want, tell me a course or item and I’ll check what’s available.", nil, nil
+	}
+
+	// Treat as product search
+	intent := &SearchIntent{Keywords: []string{}}
+	if strings.TrimSpace(s.apiKey) != "" {
+		if aiIntent, err := s.extractSearchIntent(ctx, t); err == nil {
+			intent = aiIntent
+		}
+	}
+	// Heuristic backup if LLM was empty or too vague
+	if len(intent.Keywords) == 0 && intent.Category == "" && intent.MinPrice == nil && intent.MaxPrice == nil {
+		intent = s.simpleIntentFromText(l)
+	}
+
+	items, err := s.searchListingsWithRetries(ctx, intent) // uses robust keyword expansion
+	if err != nil {
+		return "", nil, err
+	}
+	results := s.toFullListingInfos(ctx, items)
+	answer := s.generateAnswer(t, intent, len(results))
+	return answer, results, nil
+}
+
+func isGreeting(l string) bool {
+	return strings.Contains(l, "hi") || strings.Contains(l, "hello") || strings.Contains(l, "hey")
+}
+func isThanks(l string) bool {
+	return strings.Contains(l, "thanks") || strings.Contains(l, "thank you") || strings.Contains(l, "thx")
+}
+func (s *AgentService) simpleIntentFromText(l string) *SearchIntent {
+	intent := &SearchIntent{}
+	if l != "" {
+		intent.Keywords = strings.Fields(l)
+	}
+	switch {
+	case strings.Contains(l, "textbook") || strings.Contains(l, "book"):
+		intent.Category = "Textbooks"
+	case strings.Contains(l, "macbook") || strings.Contains(l, "laptop") || strings.Contains(l, "electronics"):
+		intent.Category = "Electronics"
+	case strings.Contains(l, "desk") || strings.Contains(l, "chair") || strings.Contains(l, "furniture"):
+		intent.Category = "Furniture"
+	}
+	return intent
+}
+
+// NewAgentService creates a basic agent service (no media enrichment)
 func NewAgentService(apiKey string, listingsRepo repository.ListingRepo, logger *zap.Logger) *AgentService {
 	return &AgentService{
 		apiKey:       apiKey,
@@ -34,22 +210,28 @@ func NewAgentService(apiKey string, listingsRepo repository.ListingRepo, logger 
 	}
 }
 
-// GeminiRequest represents the request to Gemini API
+// NewAgentServiceFull creates agent service with image + S3 enrichment
+func NewAgentServiceFull(apiKey string, listingsRepo repository.ListingRepo, imagesRepo repository.ImageRepo, s3 *s3client.Client, expiryMinutes int, logger *zap.Logger) *AgentService {
+	return &AgentService{
+		apiKey:        apiKey,
+		listingsRepo:  listingsRepo,
+		imagesRepo:    imagesRepo,
+		s3:            s3,
+		expiryMinutes: expiryMinutes,
+		logger:        logger,
+	}
+}
+
+// Gemini request/response types
 type GeminiRequest struct {
 	Contents []GeminiContent `json:"contents"`
 }
-
-// GeminiContent represents content in Gemini request
 type GeminiContent struct {
 	Parts []GeminiPart `json:"parts"`
 }
-
-// GeminiPart represents a part of Gemini content
 type GeminiPart struct {
 	Text string `json:"text"`
 }
-
-// GeminiResponse represents the response from Gemini API
 type GeminiResponse struct {
 	Candidates []struct {
 		Content struct {
@@ -60,7 +242,7 @@ type GeminiResponse struct {
 	} `json:"candidates"`
 }
 
-// SearchIntent represents the parsed search intent from AI
+// Parsed search intent
 type SearchIntent struct {
 	Category string   `json:"category"`
 	Keywords []string `json:"keywords"`
@@ -68,94 +250,68 @@ type SearchIntent struct {
 	MaxPrice *float64 `json:"maxPrice"`
 }
 
-// ProcessQuery processes a user query and returns search results
+// ProcessQuery returns DB results enriched for frontend consumption
 func (s *AgentService) ProcessQuery(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
 	s.logger.Info("ProcessQuery called", zap.String("query", query))
-	
-	// Check if OpenAI API key is configured
-	if s.apiKey == "" {
-		s.logger.Warn("OpenAI API key not configured, using simple intent extraction")
-		return s.processWithoutChatGPT(ctx, query)
-	}
-	
-	// Step 1: Use Gemini to understand the query
-	intent, err := s.extractSearchIntent(ctx, query)
-	if err != nil {
-		s.logger.Error("Gemini API failed, falling back to simple extraction", zap.Error(err))
+
+	var intent *SearchIntent
+	var err error
+
+	if strings.TrimSpace(s.apiKey) == "" {
+		s.logger.Warn("No LLM key configured, using heuristic intent extraction")
 		return s.processWithoutChatGPT(ctx, query)
 	}
 
-	s.logger.Info("extracted intent from ChatGPT",
+	intent, err = s.extractSearchIntent(ctx, query)
+	if err != nil {
+		s.logger.Error("Gemini intent extraction failed, using heuristic", zap.Error(err))
+		return s.processWithoutChatGPT(ctx, query)
+	}
+
+	s.logger.Info("intent",
 		zap.String("category", intent.Category),
 		zap.Strings("keywords", intent.Keywords),
+		zap.Any("min", intent.MinPrice),
+		zap.Any("max", intent.MaxPrice),
 	)
 
-	// TEMPORARY: Return mock results without database
-	// TODO: Uncomment database search after running migrations
-	
-	// Mock results for testing
-	results := []pubsub.ListingInfo{
-		{
-			ID:       "mock-id-1",
-			Title:    "CMPE 202 Textbook - Software Engineering",
-			Category: intent.Category,
-			Price:    25.00,
-		},
-		{
-			ID:       "mock-id-2",
-			Title:    "Used CMPE 202 Course Materials",
-			Category: intent.Category,
-			Price:    15.50,
-		},
+	listings, err := s.searchListings(ctx, intent)
+	if err != nil {
+		return "", nil, err
 	}
 
-	s.logger.Info("returning mock results with ChatGPT intent", zap.Int("resultCount", len(results)))
-
-	answer := fmt.Sprintf("✨ ChatGPT understood your query! I found %d items in category '%s'. These are mock results.", len(results), intent.Category)
-
+	results := s.toFullListingInfos(ctx, listings)
+	answer := s.generateAnswer(query, intent, len(results))
 	return answer, results, nil
 }
 
-// processWithoutChatGPT is a fallback for when ChatGPT is unavailable
+// Fallback: simple extraction + DB query
 func (s *AgentService) processWithoutChatGPT(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
-	// Simple intent extraction without ChatGPT
-	intent := &SearchIntent{
-		Keywords: []string{query},
+	intent := &SearchIntent{Keywords: []string{}}
+	ql := strings.ToLower(strings.TrimSpace(query))
+	if ql != "" {
+		intent.Keywords = strings.Fields(ql)
 	}
-	
-	// Detect category from query
-	queryLower := strings.ToLower(query)
-	if strings.Contains(queryLower, "textbook") || strings.Contains(queryLower, "book") {
+	switch {
+	case strings.Contains(ql, "textbook") || strings.Contains(ql, "book"):
 		intent.Category = "Textbooks"
-	} else if strings.Contains(queryLower, "macbook") || strings.Contains(queryLower, "laptop") || strings.Contains(queryLower, "electronics") {
+	case strings.Contains(ql, "macbook") || strings.Contains(ql, "laptop") || strings.Contains(ql, "electronics"):
 		intent.Category = "Electronics"
-	}
-	
-	s.logger.Info("using simple intent (no ChatGPT)",
-		zap.String("category", intent.Category),
-	)
-
-	// Mock results
-	results := []pubsub.ListingInfo{
-		{
-			ID:       "mock-id-1",
-			Title:    "CMPE 202 Textbook - Software Engineering",
-			Category: "Textbooks",
-			Price:    25.00,
-		},
-		{
-			ID:       "mock-id-2",
-			Title:    "Used CMPE 202 Course Materials",
-			Category: "Textbooks",
-			Price:    15.50,
-		},
+	case strings.Contains(ql, "desk") || strings.Contains(ql, "chair") || strings.Contains(ql, "furniture"):
+		intent.Category = "Furniture"
 	}
 
-	answer := fmt.Sprintf("I found %d items for '%s' (simple search, no AI).", len(results), query)
+	listings, err := s.searchListings(ctx, intent)
+	if err != nil {
+		return "", nil, err
+	}
+
+	results := s.toFullListingInfos(ctx, listings)
+	answer := s.generateAnswer(query, intent, len(results))
 	return answer, results, nil
 }
 
-// extractSearchIntent uses Gemini AI to parse the user's query
+// Call Gemini to extract intent
 func (s *AgentService) extractSearchIntent(ctx context.Context, query string) (*SearchIntent, error) {
 	prompt := `You are a campus marketplace assistant. Analyze the user's query and extract search parameters.
 Return ONLY a valid JSON object with these fields:
@@ -178,11 +334,7 @@ Now analyze this query: ` + query
 
 	reqBody := GeminiRequest{
 		Contents: []GeminiContent{
-			{
-				Parts: []GeminiPart{
-					{Text: prompt},
-				},
-			},
+			{Parts: []GeminiPart{{Text: prompt}}},
 		},
 	}
 
@@ -190,18 +342,15 @@ Now analyze this query: ` + query
 	if err != nil {
 		return nil, err
 	}
-
-	// Gemini uses API key in URL parameter
 	url := fmt.Sprintf("%s?key=%s", geminiURL, s.apiKey)
+
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -212,18 +361,15 @@ Now analyze this query: ` + query
 		return nil, fmt.Errorf("gemini api error: %d - %s", resp.StatusCode, string(body))
 	}
 
-	var geminiResp GeminiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+	var gr GeminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
 		return nil, err
 	}
-
-	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+	if len(gr.Candidates) == 0 || len(gr.Candidates[0].Content.Parts) == 0 {
 		return nil, fmt.Errorf("no response from gemini")
 	}
 
-	content := geminiResp.Candidates[0].Content.Parts[0].Text
-	
-	// Extract JSON from response
+	content := gr.Candidates[0].Content.Parts[0].Text
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
 	if start == -1 || end == -1 {
@@ -235,39 +381,69 @@ Now analyze this query: ` + query
 	if err := json.Unmarshal([]byte(jsonStr), &intent); err != nil {
 		return nil, fmt.Errorf("failed to parse intent json: %w", err)
 	}
-
 	return &intent, nil
 }
 
-// searchListings searches the database based on extracted intent
+// Build repo params and query DB
 func (s *AgentService) searchListings(ctx context.Context, intent *SearchIntent) ([]domain.Listing, error) {
 	params := repository.ListParams{
 		Category: intent.Category,
 		PriceMin: intent.MinPrice,
 		PriceMax: intent.MaxPrice,
-		Limit:    10, // Return top 10 results
-		Status:   "available", // Only search available items
+		Status:   "active", // must match your data
+		Limit:    10,       // top results
+		Offset:   0,
+		Sort:     "created_desc", // same as HTTP default
 	}
-
-	// Combine keywords into search query
 	if len(intent.Keywords) > 0 {
 		params.Q = strings.Join(intent.Keywords, " ")
 	}
-
 	listings, _, err := s.listingsRepo.List(ctx, params)
 	return listings, err
 }
 
-// generateAnswer creates a natural language answer
+// Natural language answer
 func (s *AgentService) generateAnswer(query string, intent *SearchIntent, resultCount int) string {
 	if resultCount == 0 {
 		return fmt.Sprintf("I couldn't find any items matching '%s'. Try adjusting your search or check back later!", query)
 	}
-
 	if resultCount == 1 {
 		return fmt.Sprintf("I found 1 item for '%s'. Check it out below!", query)
 	}
-
 	return fmt.Sprintf("I found %d items for '%s'. Here are the best matches:", resultCount, query)
 }
 
+// toFullListingInfos maps domain listings and enriches image URL like the HTTP handler
+func (s *AgentService) toFullListingInfos(ctx context.Context, listings []domain.Listing) []pubsub.ListingInfo {
+	out := make([]pubsub.ListingInfo, 0, len(listings))
+	for _, l := range listings {
+		item := pubsub.ListingInfo{
+			ID:          l.ID.String(),
+			SellerID:    l.SellerID.String(),
+			Title:       l.Title,
+			Description: l.Description,
+			Category:    l.Category,
+			Price:       l.Price, // adjust if you store cents
+			Condition:   string(l.Condition),
+			Status:      string(l.Status),
+			CreatedAt:   l.CreatedAt.Format(time.RFC3339Nano),
+			UpdatedAt:   l.UpdatedAt.Format(time.RFC3339Nano),
+		}
+
+		// Primary image + presign (if repos/clients available)
+		if s.imagesRepo != nil {
+			if img, err := s.imagesRepo.GetPrimary(ctx, l.ID); err == nil && img != nil {
+				pi := &pubsub.PrimaryImage{Key: img.S3Key}
+				if s.s3 != nil && s.expiryMinutes > 0 {
+					if url, err := s.s3.PresignGet(ctx, img.S3Key, time.Duration(s.expiryMinutes)*time.Minute); err == nil {
+						pi.URL = url
+					}
+				}
+				item.PrimaryImage = pi
+			}
+		}
+
+		out = append(out, item)
+	}
+	return out
+}

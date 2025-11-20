@@ -7,25 +7,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// Hub maintains active websocket connections and routes messages
 type Hub struct {
-	// Registered clients (userID -> client)
-	clients map[string]*Client
-
-	// Register requests from clients
-	register chan *Client
-
-	// Unregister requests from clients
+	clients    map[string]*Client
+	register   chan *Client
 	unregister chan *Client
-
-	// Pub/sub bus for inter-service communication
-	bus *pubsub.Bus
-
-	// Logger
-	logger *zap.Logger
+	bus        *pubsub.Bus
+	logger     *zap.Logger
 }
 
-// NewHub creates a new Hub
 func NewHub(bus *pubsub.Bus, logger *zap.Logger) *Hub {
 	return &Hub{
 		clients:    make(map[string]*Client),
@@ -36,124 +25,126 @@ func NewHub(bus *pubsub.Bus, logger *zap.Logger) *Hub {
 	}
 }
 
-// RegisterClient registers a new client with the hub
-func (h *Hub) RegisterClient(client *Client) {
-	h.register <- client
-}
+func (h *Hub) RegisterClient(client *Client) { h.register <- client }
 
-// Run starts the hub's main loop
 func (h *Hub) Run() {
-	// Subscribe to agent responses for all users
-	// Workers publish to "agent.response" topic
-	responseChan := h.bus.Subscribe("agent.response")
+	agentRespChan := h.bus.Subscribe("agent.response")
+	chatRespChan := h.bus.Subscribe("chat.response") // NEW
 
 	for {
 		select {
-		case client := <-h.register:
-			h.clients[client.userID] = client
-			h.logger.Info("client registered",
-				zap.String("userId", client.userID),
-				zap.Int("totalClients", len(h.clients)),
-			)
+		case c := <-h.register:
+			h.clients[c.userID] = c
+			h.logger.Info("client registered", zap.String("userId", c.userID), zap.Int("totalClients", len(h.clients)))
 
-		case client := <-h.unregister:
-			if _, ok := h.clients[client.userID]; ok {
-				delete(h.clients, client.userID)
-				close(client.send)
-				h.logger.Info("client unregistered",
-					zap.String("userId", client.userID),
-					zap.Int("totalClients", len(h.clients)),
-				)
+		case c := <-h.unregister:
+			if _, ok := h.clients[c.userID]; ok {
+				delete(h.clients, c.userID)
+				close(c.send)
+				h.logger.Info("client unregistered", zap.String("userId", c.userID), zap.Int("totalClients", len(h.clients)))
 			}
 
-		case msg := <-responseChan:
-			// Route agent responses to the appropriate client
+		case msg := <-agentRespChan:
 			h.handleAgentResponse(msg)
+
+		case msg := <-chatRespChan:
+			h.handleChatResponse(msg) // NEW
 		}
 	}
 }
 
-// handleAgentResponse routes agent responses to the correct client
 func (h *Hub) handleAgentResponse(msg pubsub.Message) {
-	response, ok := msg.Payload.(pubsub.AgentResponse)
+	res, ok := msg.Payload.(pubsub.AgentResponse)
 	if !ok {
 		h.logger.Error("invalid agent response payload")
 		return
 	}
-
-	client, exists := h.clients[response.UserID]
-	if !exists {
-		h.logger.Warn("client not found for agent response",
-			zap.String("userId", response.UserID),
-		)
+	client, ok := h.clients[res.UserID]
+	if !ok {
+		h.logger.Warn("client not found for agent response", zap.String("userId", res.UserID))
 		return
 	}
-
-	// Convert pubsub listing info to WS listing info
-	wsResults := make([]ListingInfo, len(response.Results))
-	for i, r := range response.Results {
-		wsResults[i] = ListingInfo{
-			ID:       r.ID,
-			Title:    r.Title,
-			Category: r.Category,
-			Price:    r.Price,
-		}
+	wsResults := make([]ListingInfo, len(res.Results))
+	for i, r := range res.Results {
+		wsResults[i] = convertListing(r)
 	}
-
-	payload := AgentResponsePayload{
-		Answer:  response.Answer,
-		Results: wsResults,
-	}
-
-	eventBytes, err := NewEvent(EventTypeAgentResponse, response.RequestID, payload)
+	payload := AgentResponsePayload{Answer: res.Answer, Results: wsResults}
+	ev, err := NewEvent(EventTypeAgentResponse, res.RequestID, payload)
 	if err != nil {
-		h.logger.Error("failed to create agent response event", zap.Error(err))
+		h.logger.Error("marshal agent response failed", zap.Error(err))
 		return
 	}
-
 	select {
-	case client.send <- eventBytes:
-		h.logger.Debug("sent agent response to client",
-			zap.String("userId", response.UserID),
-			zap.String("requestId", response.RequestID),
-		)
+	case client.send <- ev:
 	default:
-		h.logger.Warn("client send buffer full, dropping message",
-			zap.String("userId", response.UserID),
-		)
+		h.logger.Warn("client send buffer full, dropping agent response", zap.String("userId", res.UserID))
 	}
 }
 
-// publishAgentRequest publishes an agent request to the pubsub bus
+// NEW
+func (h *Hub) handleChatResponse(msg pubsub.Message) {
+	res, ok := msg.Payload.(pubsub.ChatResponse)
+	if !ok {
+		h.logger.Error("invalid chat response payload")
+		return
+	}
+	client, ok := h.clients[res.UserID]
+	if !ok {
+		h.logger.Warn("client not found for chat response", zap.String("userId", res.UserID))
+		return
+	}
+	wsResults := make([]ListingInfo, len(res.Results))
+	for i, r := range res.Results {
+		wsResults[i] = convertListing(r)
+	}
+	payload := ChatResponsePayload{Answer: res.Answer, Results: wsResults}
+	ev, err := NewEvent(EventTypeChatResponse, res.RequestID, payload)
+	if err != nil {
+		h.logger.Error("marshal chat response failed", zap.Error(err))
+		return
+	}
+	select {
+	case client.send <- ev:
+	default:
+		h.logger.Warn("client send buffer full, dropping chat response", zap.String("userId", res.UserID))
+	}
+}
+
+func convertListing(r pubsub.ListingInfo) ListingInfo {
+	var pi *PrimaryImage
+	if r.PrimaryImage != nil {
+		pi = &PrimaryImage{Key: r.PrimaryImage.Key, URL: r.PrimaryImage.URL}
+	}
+	return ListingInfo{
+		ID: r.ID, SellerID: r.SellerID, Title: r.Title, Description: r.Description,
+		Category: r.Category, Price: r.Price, Condition: r.Condition, Status: r.Status,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, PrimaryImage: pi,
+	}
+}
+
+// publishAgentRequest (existing)
 func (h *Hub) publishAgentRequest(userID, requestID, query string) {
-	req := pubsub.AgentRequest{
-		UserID:    userID,
-		RequestID: requestID,
-		Query:     query,
-	}
-
+	req := pubsub.AgentRequest{UserID: userID, RequestID: requestID, Query: query}
 	h.bus.Publish("agent.request", req)
-	h.logger.Debug("published agent request",
-		zap.String("userId", userID),
-		zap.String("requestId", requestID),
-		zap.String("query", query),
-	)
+	h.logger.Debug("published agent request", zap.String("userId", userID), zap.String("requestId", requestID), zap.String("query", query))
 }
 
-// GetClientCount returns the number of connected clients
-func (h *Hub) GetClientCount() int {
-	return len(h.clients)
+// NEW: publish chat message
+func (h *Hub) publishChatRequest(userID, requestID, text string) {
+	req := pubsub.ChatRequest{UserID: userID, RequestID: requestID, Text: text}
+	h.bus.Publish("chat.request", req)
+	h.logger.Debug("published chat request", zap.String("userId", userID), zap.String("requestId", requestID), zap.String("text", text))
 }
 
-// BroadcastToUser sends a message to a specific user (if connected)
+func (h *Hub) GetClientCount() int { return len(h.clients) }
+
 func (h *Hub) BroadcastToUser(userID string, message []byte) error {
-	client, exists := h.clients[userID]
-	if !exists {
+	c, ok := h.clients[userID]
+	if !ok {
 		return fmt.Errorf("user not connected: %s", userID)
 	}
-
 	select {
-	case client.send <- message:
+	case c.send <- message:
 		return nil
 	default:
 		return fmt.Errorf("client send buffer full for user: %s", userID)

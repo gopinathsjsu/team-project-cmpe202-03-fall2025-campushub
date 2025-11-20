@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -104,7 +105,22 @@ func (c *Client) WritePump() {
 	}
 }
 
-// handleEvent processes incoming events from the client
+// handleChatMessage handles free-form chat requests (small talk + product search)
+func (c *Client) handleChatMessage(event Event) {
+	var payload ChatMessagePayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		c.sendError(event.RequestID, "invalid payload", "INVALID_PAYLOAD")
+		return
+	}
+	if strings.TrimSpace(payload.Text) == "" {
+		c.sendError(event.RequestID, "text is required", "MISSING_TEXT")
+		return
+	}
+
+	// Publish to pubsub bus for chat worker to process
+	c.hub.publishChatRequest(c.userID, event.RequestID, payload.Text)
+}
+
 func (c *Client) handleEvent(event Event) {
 	c.logger.Debug("received event",
 		zap.String("type", event.Type),
@@ -115,6 +131,11 @@ func (c *Client) handleEvent(event Event) {
 	switch event.Type {
 	case EventTypeAgentSearch:
 		c.handleAgentSearch(event)
+
+	// ✅ NEW: free-form chat message
+	case EventTypeChatMessage:
+		c.handleChatMessage(event)
+
 	default:
 		c.sendError(event.RequestID, "unknown event type", "UNKNOWN_EVENT")
 	}

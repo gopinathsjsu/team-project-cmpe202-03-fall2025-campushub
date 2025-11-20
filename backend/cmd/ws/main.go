@@ -46,12 +46,11 @@ func main() {
 
 	pool, err := postgres.NewPool(ctx, cfg.DBDSN)
 	if err != nil {
-		log.Warn("db connection failed, agent will not work", zap.Error(err))
+		log.Warn("db connection failed, agent/chat workers will not run", zap.Error(err))
 	} else {
 		defer pool.Close()
 
-		// Initialize agent service
-		// Use OPENAI_API_KEY env var for Gemini (or GEMINI_API_KEY if you added it)
+		// Determine API key (prefer GeminiKey if present)
 		apiKey := cfg.OpenAIKey
 		if cfg.GeminiKey != "" {
 			apiKey = cfg.GeminiKey
@@ -65,16 +64,23 @@ func main() {
 			if len(apiKey) > 10 {
 				maskedKey = apiKey[:10] + "..." + apiKey[len(apiKey)-4:]
 			}
-			log.Info("API key loaded for Gemini", zap.String("key_preview", maskedKey))
+			log.Info("API key loaded for LLM", zap.String("key_preview", maskedKey))
 		}
 
+		// Repositories
 		listingsRepo := postgres.NewListingRepo(pool)
-		agentService := service.NewAgentService(apiKey, listingsRepo, log)
+		imagesRepo := postgres.NewImageRepo(pool) // ensure this exists in your repo layer
 
-		// Start worker goroutine
-		go startWorker(bus, agentService, log)
+		// Agent service: use the "Full" constructor so results can include primaryImage (S3 can be nil)
+		// Pass nil for S3 for now; presigned URLs appear once you wire an s3client.Client.
+		const presignExpiryMin = 15
+		agentService := service.NewAgentServiceFull(apiKey, listingsRepo, imagesRepo, nil /* s3 */, presignExpiryMin, log)
 
-		log.Info("agent worker started")
+		// Start workers (in-proc, same bus)
+		go startAgentWorker(bus, agentService, log)
+		go startChatWorker(bus, agentService, log)
+
+		log.Info("agent and chat workers started")
 	}
 
 	// HTTP handler
@@ -85,7 +91,7 @@ func main() {
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	addr := ":" + cfg.WSPort
@@ -99,7 +105,7 @@ func main() {
 
 func serveWs(hub *ws.Hub, w http.ResponseWriter, r *http.Request, jwtSecret []byte, log *zap.Logger) {
 	// TEMPORARY: Skip JWT validation for testing
-	// TODO: Re-enable authentication before production
+	// TODO: Re-enable authentication before production (parse ?token=, verify, set userID/role from claims)
 
 	// Upgrade connection without auth
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -126,12 +132,19 @@ func serveWs(hub *ws.Hub, w http.ResponseWriter, r *http.Request, jwtSecret []by
 	go client.ReadPump()
 }
 
-// startWorker processes agent requests from pub/sub
-func startWorker(bus *pubsub.Bus, agentService *service.AgentService, log *zap.Logger) {
-	requestChan := bus.Subscribe("agent.request")
+// ===== Workers =====
 
-	for msg := range requestChan {
+func startAgentWorker(bus *pubsub.Bus, agentService *service.AgentService, log *zap.Logger) {
+	ch := bus.Subscribe("agent.request")
+	for msg := range ch {
 		go handleAgentRequest(context.Background(), msg, agentService, bus, log)
+	}
+}
+
+func startChatWorker(bus *pubsub.Bus, agentService *service.AgentService, log *zap.Logger) {
+	ch := bus.Subscribe("chat.request")
+	for msg := range ch {
+		go handleChatRequest(context.Background(), msg, agentService, bus, log)
 	}
 }
 
@@ -148,10 +161,10 @@ func handleAgentRequest(ctx context.Context, msg pubsub.Message, agentService *s
 		zap.String("query", req.Query),
 	)
 
-	// Process query with ChatGPT and DB search
+	// Process query with LLM (if configured) + DB search
 	answer, results, err := agentService.ProcessQuery(ctx, req.Query)
 	if err != nil {
-		log.Error("failed to process query",
+		log.Error("failed to process agent query",
 			zap.Error(err),
 			zap.String("requestId", req.RequestID),
 		)
@@ -166,10 +179,43 @@ func handleAgentRequest(ctx context.Context, msg pubsub.Message, agentService *s
 		Answer:    answer,
 		Results:   results,
 	}
-
 	bus.Publish("agent.response", response)
 
 	log.Info("agent response published",
+		zap.String("userId", req.UserID),
+		zap.String("requestId", req.RequestID),
+		zap.Int("resultCount", len(results)),
+	)
+}
+
+func handleChatRequest(ctx context.Context, msg pubsub.Message, agent *service.AgentService, bus *pubsub.Bus, log *zap.Logger) {
+	req, ok := msg.Payload.(pubsub.ChatRequest)
+	if !ok {
+		log.Error("invalid chat request payload")
+		return
+	}
+
+	log.Info("processing chat request",
+		zap.String("userId", req.UserID),
+		zap.String("requestId", req.RequestID),
+	)
+
+	answer, results, err := agent.ProcessChat(ctx, req.Text)
+	if err != nil {
+		log.Error("chat processing failed", zap.Error(err), zap.String("requestId", req.RequestID))
+		answer = "Sorry, I had trouble with that. Try rephrasing?"
+		results = nil
+	}
+
+	resp := pubsub.ChatResponse{
+		UserID:    req.UserID,
+		RequestID: req.RequestID,
+		Answer:    answer,
+		Results:   results,
+	}
+	bus.Publish("chat.response", resp)
+
+	log.Info("chat response published",
 		zap.String("userId", req.UserID),
 		zap.String("requestId", req.RequestID),
 		zap.Int("resultCount", len(results)),
