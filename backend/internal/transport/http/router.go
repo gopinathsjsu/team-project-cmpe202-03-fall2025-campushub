@@ -86,6 +86,7 @@ func NewRouter(d Deps) *gin.Engine {
 		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Update)
 		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.MarkSold)
 		v1.DELETE("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Delete)
+		v1.GET("/listings/mine", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.ListMine)
 
 		v1.POST("/uploads/presign", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Presign)
 		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Complete)

@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/config"
+	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/platform/jwt" // <— NEW
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/pubsub"
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/repository/postgres"
 	"github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/backend/internal/service"
@@ -18,8 +19,8 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// TODO: Configure proper origin validation for production
-		return true // Allow all origins in dev
+		// TODO: tighten this for prod
+		return true
 	},
 }
 
@@ -32,63 +33,60 @@ func main() {
 		log.Fatal("config load failed", zap.Error(err))
 	}
 
-	// Initialize pub/sub bus
+	// pub/sub
 	bus := pubsub.New()
 
-	// Initialize WebSocket hub
+	// hub
 	hub := ws.NewHub(bus, log)
 	go hub.Run()
-
 	log.Info("websocket hub started")
 
-	// Initialize DB and agent service for worker functionality
+	// DB + agent service
 	ctx := context.Background()
 
 	pool, err := postgres.NewPool(ctx, cfg.DBDSN)
 	if err != nil {
-		log.Warn("db connection failed, agent/chat workers will not run", zap.Error(err))
+		log.Warn("db connection failed, agent/chat will not work", zap.Error(err))
 	} else {
 		defer pool.Close()
 
-		// Determine API key (prefer GeminiKey if present)
+		// choose AI key
 		apiKey := cfg.OpenAIKey
 		if cfg.GeminiKey != "" {
 			apiKey = cfg.GeminiKey
 		}
-
 		if apiKey == "" {
 			log.Warn("No API key configured (OPENAI_API_KEY or GEMINI_API_KEY)")
 		} else {
-			// Only show first 10 chars for security
-			maskedKey := apiKey
+			masked := apiKey
 			if len(apiKey) > 10 {
-				maskedKey = apiKey[:10] + "..." + apiKey[len(apiKey)-4:]
+				masked = apiKey[:10] + "..." + apiKey[len(apiKey)-4:]
 			}
-			log.Info("API key loaded for LLM", zap.String("key_preview", maskedKey))
+			log.Info("API key loaded for Gemini", zap.String("key_preview", masked))
 		}
 
-		// Repositories
 		listingsRepo := postgres.NewListingRepo(pool)
-		imagesRepo := postgres.NewImageRepo(pool) // ensure this exists in your repo layer
+		imagesRepo := postgres.NewImageRepo(pool)
 
-		// Agent service: use the "Full" constructor so results can include primaryImage (S3 can be nil)
-		// Pass nil for S3 for now; presigned URLs appear once you wire an s3client.Client.
-		const presignExpiryMin = 15
-		agentService := service.NewAgentServiceFull(apiKey, listingsRepo, imagesRepo, nil /* s3 */, presignExpiryMin, log)
+		agentSvc := service.NewAgentServiceFull(
+			apiKey,
+			listingsRepo,
+			imagesRepo,
+			nil,
+			cfg.PresignExpiry,
+			log,
+		)
 
-		// Start workers (in-proc, same bus)
-		go startAgentWorker(bus, agentService, log)
-		go startChatWorker(bus, agentService, log)
+		go startAgentWorker(bus, agentSvc, log)
+		go startChatWorker(bus, agentSvc, log)
 
-		log.Info("agent and chat workers started")
+		log.Info("agent & chat workers started")
 	}
 
-	// HTTP handler
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r, []byte(cfg.JWTSecret), log)
 	})
-
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -103,36 +101,45 @@ func main() {
 	}
 }
 
-func serveWs(hub *ws.Hub, w http.ResponseWriter, r *http.Request, jwtSecret []byte, log *zap.Logger) {
-	// TEMPORARY: Skip JWT validation for testing
-	// TODO: Re-enable authentication before production (parse ?token=, verify, set userID/role from claims)
+// --- AUTHENTICATED WEBSOCKET UPGRADE ---
 
-	// Upgrade connection without auth
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Error("websocket upgrade failed", zap.Error(err))
+func serveWs(hub *ws.Hub, w http.ResponseWriter, r *http.Request, jwtSecret []byte, log *zap.Logger) {
+	tokenStr := r.URL.Query().Get("token")
+	if tokenStr == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
 		return
 	}
 
-	// Create client with test user
-	testUserID := "test-user-" + r.RemoteAddr
-	testRole := "buyer"
-	client := ws.NewClient(hub, conn, testUserID, testRole, log)
+	// Validate JWT
+	claims, err := jwt.ParseAndValidate(string(jwtSecret), tokenStr)
+	if err != nil {
+		log.Warn("WS auth failed", zap.Error(err))
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
 
-	// Register client and start pumps
+	userID := claims.Sub
+	role := claims.Role
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Error("ws upgrade failed", zap.Error(err))
+		return
+	}
+
+	client := ws.NewClient(hub, conn, userID, role, log)
 	hub.RegisterClient(client)
 
-	log.Info("client connected (no auth)",
-		zap.String("userId", testUserID),
-		zap.String("role", testRole),
+	log.Info("client connected",
+		zap.String("userId", userID),
+		zap.String("role", role),
 	)
 
-	// Start read and write pumps
 	go client.WritePump()
 	go client.ReadPump()
 }
 
-// ===== Workers =====
+// --- WORKERS ---
 
 func startAgentWorker(bus *pubsub.Bus, agentService *service.AgentService, log *zap.Logger) {
 	ch := bus.Subscribe("agent.request")
@@ -161,31 +168,19 @@ func handleAgentRequest(ctx context.Context, msg pubsub.Message, agentService *s
 		zap.String("query", req.Query),
 	)
 
-	// Process query with LLM (if configured) + DB search
 	answer, results, err := agentService.ProcessQuery(ctx, req.Query)
 	if err != nil {
-		log.Error("failed to process agent query",
-			zap.Error(err),
-			zap.String("requestId", req.RequestID),
-		)
+		log.Error("failed to process query", zap.Error(err), zap.String("requestId", req.RequestID))
 		answer = "Sorry, I encountered an error processing your request. Please try again."
 		results = []pubsub.ListingInfo{}
 	}
 
-	// Publish response
-	response := pubsub.AgentResponse{
+	bus.Publish("agent.response", pubsub.AgentResponse{
 		UserID:    req.UserID,
 		RequestID: req.RequestID,
 		Answer:    answer,
 		Results:   results,
-	}
-	bus.Publish("agent.response", response)
-
-	log.Info("agent response published",
-		zap.String("userId", req.UserID),
-		zap.String("requestId", req.RequestID),
-		zap.Int("resultCount", len(results)),
-	)
+	})
 }
 
 func handleChatRequest(ctx context.Context, msg pubsub.Message, agent *service.AgentService, bus *pubsub.Bus, log *zap.Logger) {
@@ -198,6 +193,7 @@ func handleChatRequest(ctx context.Context, msg pubsub.Message, agent *service.A
 	log.Info("processing chat request",
 		zap.String("userId", req.UserID),
 		zap.String("requestId", req.RequestID),
+		zap.String("text", req.Text),
 	)
 
 	answer, results, err := agent.ProcessChat(ctx, req.Text)
@@ -207,17 +203,10 @@ func handleChatRequest(ctx context.Context, msg pubsub.Message, agent *service.A
 		results = nil
 	}
 
-	resp := pubsub.ChatResponse{
+	bus.Publish("chat.response", pubsub.ChatResponse{
 		UserID:    req.UserID,
 		RequestID: req.RequestID,
 		Answer:    answer,
 		Results:   results,
-	}
-	bus.Publish("chat.response", resp)
-
-	log.Info("chat response published",
-		zap.String("userId", req.UserID),
-		zap.String("requestId", req.RequestID),
-		zap.Int("resultCount", len(results)),
-	)
+	})
 }

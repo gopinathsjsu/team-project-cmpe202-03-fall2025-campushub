@@ -81,7 +81,6 @@ func (h *Hub) handleAgentResponse(msg pubsub.Message) {
 	}
 }
 
-// NEW
 func (h *Hub) handleChatResponse(msg pubsub.Message) {
 	res, ok := msg.Payload.(pubsub.ChatResponse)
 	if !ok {
@@ -133,18 +132,24 @@ func (h *Hub) publishAgentRequest(userID, requestID, query string) {
 func (h *Hub) publishChatRequest(userID, requestID, text string) {
 	req := pubsub.ChatRequest{UserID: userID, RequestID: requestID, Text: text}
 	h.bus.Publish("chat.request", req)
-	h.logger.Debug("published chat request", zap.String("userId", userID), zap.String("requestId", requestID), zap.String("text", text))
+	h.logger.Debug("published chat request",
+		zap.String("userId", userID),
+		zap.String("requestId", requestID),
+		zap.String("text", text),
+	)
 }
 
 func (h *Hub) GetClientCount() int { return len(h.clients) }
 
 func (h *Hub) BroadcastToUser(userID string, message []byte) error {
-	c, ok := h.clients[userID]
-	if !ok {
+	client, exists := h.clients[userID]
+	h.logger.Debug("BroadcastToUser", zap.String("userId", userID), zap.Bool("exists", exists))
+	if !exists {
 		return fmt.Errorf("user not connected: %s", userID)
 	}
+
 	select {
-	case c.send <- message:
+	case client.send <- message:
 		return nil
 	default:
 		return fmt.Errorf("client send buffer full for user: %s", userID)

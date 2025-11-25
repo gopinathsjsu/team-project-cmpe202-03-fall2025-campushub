@@ -1,26 +1,60 @@
 package ws
 
-import "encoding/json"
-
-// Event types
-const (
-	EventTypeAgentSearch   = "agent.search"   // existing structured search
-	EventTypeAgentResponse = "agent.response" // existing structured response
-	EventTypeChatMessage   = "chat.message"   // NEW: free-form chat input
-	EventTypeChatResponse  = "chat.response"  // NEW: chat output (answer + optional results)
-	EventTypeError         = "error"
+import (
+	"encoding/json"
+	"time"
 )
 
+// EventType constants
+const (
+	EventTypeAgentSearch   = "agent.search"
+	EventTypeAgentResponse = "agent.response"
+
+	// Chat / AI chat
+	EventTypeChatMessage  = "chat.message"  // client -> server (AI chat text)
+	EventTypeChatResponse = "chat.response" // server -> client (AI answer + results)
+
+	// Optional: for user-to-user chat delivery
+	EventTypeChatDeliver = "chat.deliver"
+
+	EventTypeError = "error"
+)
+
+// Event is the base structure for all WebSocket messages
 type Event struct {
 	Type      string          `json:"type"`
 	RequestID string          `json:"requestId"`
 	Payload   json.RawMessage `json:"payload"`
 }
 
-// -------- agent (unchanged) --------
+// ---------- Incoming payloads from client ----------
 
+// AgentSearchPayload is sent by clients to search listings via AI (product-only search)
 type AgentSearchPayload struct {
 	Query string `json:"query"`
+}
+
+// ChatMessagePayload is sent by clients for conversational AI chat
+// Example:
+// { "type": "chat.message", "requestId": "...", "payload": { "text": "Do you have a used textbook for CMPE 202?" } }
+type ChatMessagePayload struct {
+	ToUserID string `json:"toUserId"`
+	Text     string `json:"text"`
+}
+
+type AgentResponsePayload struct {
+	Answer  string        `json:"answer"`
+	Results []ListingInfo `json:"results"`
+}
+
+type ChatResponsePayload struct {
+	Answer  string        `json:"answer"`
+	Results []ListingInfo `json:"results"`
+}
+type ChatDeliverPayload struct {
+	FromUserID string    `json:"fromUserId"`
+	Text       string    `json:"text"`
+	SentAt     time.Time `json:"sentAt"`
 }
 
 type PrimaryImage struct {
@@ -28,6 +62,8 @@ type PrimaryImage struct {
 	URL string `json:"url"`
 }
 
+// ListingInfo contains minimal listing data for WS messages.
+// This mirrors pubsub.ListingInfo so Hub.convertListing can map fields directly.
 type ListingInfo struct {
 	ID           string        `json:"id"`
 	SellerID     string        `json:"sellerId"`
@@ -42,38 +78,32 @@ type ListingInfo struct {
 	PrimaryImage *PrimaryImage `json:"primaryImage,omitempty"`
 }
 
-type AgentResponsePayload struct {
-	Answer  string        `json:"answer"`
-	Results []ListingInfo `json:"results"`
-}
-
-// -------- chat (new) --------
-
-type ChatMessagePayload struct {
-	Text string `json:"text"`
-}
-
-type ChatResponsePayload struct {
-	Answer  string        `json:"answer"`
-	Results []ListingInfo `json:"results,omitempty"`
-}
-
-// -------- errors / helpers --------
+// ---------- Errors ----------
 
 type ErrorPayload struct {
 	Message string `json:"message"`
 	Code    string `json:"code,omitempty"`
 }
 
+// NewEvent creates a new event with the given type and payload
 func NewEvent(eventType, requestID string, payload interface{}) ([]byte, error) {
-	b, err := json.Marshal(payload)
+	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	ev := Event{Type: eventType, RequestID: requestID, Payload: b}
-	return json.Marshal(ev)
+
+	event := Event{
+		Type:      eventType,
+		RequestID: requestID,
+		Payload:   payloadBytes,
+	}
+
+	return json.Marshal(event)
 }
 
 func NewErrorEvent(requestID, message, code string) ([]byte, error) {
-	return NewEvent(EventTypeError, requestID, ErrorPayload{Message: message, Code: code})
+	return NewEvent(EventTypeError, requestID, ErrorPayload{
+		Message: message,
+		Code:    code,
+	})
 }

@@ -250,58 +250,68 @@ type SearchIntent struct {
 	MaxPrice *float64 `json:"maxPrice"`
 }
 
-// ProcessQuery returns DB results enriched for frontend consumption
 func (s *AgentService) ProcessQuery(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
 	s.logger.Info("ProcessQuery called", zap.String("query", query))
 
-	var intent *SearchIntent
-	var err error
+	t := strings.TrimSpace(query)
+	l := strings.ToLower(t)
 
-	if strings.TrimSpace(s.apiKey) == "" {
-		s.logger.Warn("No LLM key configured, using heuristic intent extraction")
-		return s.processWithoutChatGPT(ctx, query)
+	// Start with an empty intent
+	intent := &SearchIntent{Keywords: []string{}}
+
+	// 1) Try LLM-based intent extraction (Gemini)
+	if strings.TrimSpace(s.apiKey) != "" {
+		if aiIntent, err := s.extractSearchIntent(ctx, t); err == nil {
+			intent = aiIntent
+		} else {
+			s.logger.Error("Gemini intent extraction failed in ProcessQuery, using heuristic", zap.Error(err))
+		}
+	} else {
+		s.logger.Warn("No LLM key configured in ProcessQuery, using heuristic intent extraction")
 	}
 
-	intent, err = s.extractSearchIntent(ctx, query)
-	if err != nil {
-		s.logger.Error("Gemini intent extraction failed, using heuristic", zap.Error(err))
-		return s.processWithoutChatGPT(ctx, query)
+	// 2) Heuristic backup if LLM gave us nothing useful
+	if len(intent.Keywords) == 0 && intent.Category == "" && intent.MinPrice == nil && intent.MaxPrice == nil {
+		s.logger.Info("ProcessQuery: LLM intent empty, falling back to simpleIntentFromText")
+		intent = s.simpleIntentFromText(l)
 	}
 
-	s.logger.Info("intent",
+	s.logger.Info("ProcessQuery final intent",
 		zap.String("category", intent.Category),
 		zap.Strings("keywords", intent.Keywords),
 		zap.Any("min", intent.MinPrice),
 		zap.Any("max", intent.MaxPrice),
 	)
 
-	listings, err := s.searchListings(ctx, intent)
+	// 3) Use the SAME robust search as chat (with keyword expansion + fallback)
+	listings, err := s.searchListingsWithRetries(ctx, intent)
 	if err != nil {
 		return "", nil, err
 	}
 
+	// 4) Map to pubsub DTOs and build an answer string
 	results := s.toFullListingInfos(ctx, listings)
 	answer := s.generateAnswer(query, intent, len(results))
 	return answer, results, nil
 }
 
 // Fallback: simple extraction + DB query
+// Fallback: simple extraction + DB query (no LLM key or LLM failure)
 func (s *AgentService) processWithoutChatGPT(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
-	intent := &SearchIntent{Keywords: []string{}}
 	ql := strings.ToLower(strings.TrimSpace(query))
-	if ql != "" {
-		intent.Keywords = strings.Fields(ql)
-	}
-	switch {
-	case strings.Contains(ql, "textbook") || strings.Contains(ql, "book"):
-		intent.Category = "Textbooks"
-	case strings.Contains(ql, "macbook") || strings.Contains(ql, "laptop") || strings.Contains(ql, "electronics"):
-		intent.Category = "Electronics"
-	case strings.Contains(ql, "desk") || strings.Contains(ql, "chair") || strings.Contains(ql, "furniture"):
-		intent.Category = "Furniture"
-	}
 
-	listings, err := s.searchListings(ctx, intent)
+	// Reuse the same heuristic intent builder
+	intent := s.simpleIntentFromText(ql)
+
+	s.logger.Info("processWithoutChatGPT intent",
+		zap.String("category", intent.Category),
+		zap.Strings("keywords", intent.Keywords),
+		zap.Any("min", intent.MinPrice),
+		zap.Any("max", intent.MaxPrice),
+	)
+
+	// IMPORTANT: use the same robust search with retries & keyword expansion
+	listings, err := s.searchListingsWithRetries(ctx, intent)
 	if err != nil {
 		return "", nil, err
 	}
@@ -311,7 +321,6 @@ func (s *AgentService) processWithoutChatGPT(ctx context.Context, query string) 
 	return answer, results, nil
 }
 
-// Call Gemini to extract intent
 func (s *AgentService) extractSearchIntent(ctx context.Context, query string) (*SearchIntent, error) {
 	prompt := `You are a campus marketplace assistant. Analyze the user's query and extract search parameters.
 Return ONLY a valid JSON object with these fields:
