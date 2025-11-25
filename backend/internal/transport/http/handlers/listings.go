@@ -25,10 +25,10 @@ type ListingsHandler struct {
 
 type listingWithImage struct {
 	domain.Listing `json:",inline"`
-	PrimaryImage   *struct {
+	Images         []struct {
 		Key string `json:"key"`
 		URL string `json:"url"`
-	} `json:"primaryImage,omitempty"`
+	} `json:"images"`
 }
 
 func NewListingsHandler(
@@ -84,6 +84,102 @@ func (h *ListingsHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp.Data(l))
 }
 
+// ------------------------ ListMine (auth user’s listings) ------------------------
+
+func (h *ListingsHandler) ListMine(c *gin.Context) {
+	uidVal, ok := c.Get("userId")
+	if !ok {
+		c.JSON(http.StatusUnauthorized, resp.Err("UNAUTHORIZED", "missing user id in context", nil))
+		return
+	}
+
+	uidStr, ok := uidVal.(string)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, resp.Err("UNAUTHORIZED", "invalid user id type", nil))
+		return
+	}
+
+	sellerID, err := uuid.Parse(uidStr)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, resp.Err("UNAUTHORIZED", "invalid user id", err.Error()))
+		return
+	}
+
+	status := c.DefaultQuery("status", "active")
+	sort := c.DefaultQuery("sort", "created_desc")
+
+	var pminPtr, pmaxPtr *float64
+	if s := c.Query("priceMin"); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil {
+			pminPtr = &v
+		}
+	}
+	if s := c.Query("priceMax"); s != "" {
+		if v, err := strconv.ParseFloat(s, 64); err == nil {
+			pmaxPtr = &v
+		}
+	}
+	limit := 20
+	if s := c.Query("limit"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 && v <= 100 {
+			limit = v
+		}
+	}
+	offset := 0
+	if s := c.Query("offset"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+
+	items, total, err := h.repo.List(c.Request.Context(), repository.ListParams{
+		Status:   status,
+		PriceMin: pminPtr,
+		PriceMax: pmaxPtr,
+		Limit:    limit,
+		Offset:   offset,
+		Sort:     sort,
+		SellerID: &sellerID, // filter by current user
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, resp.Err("INTERNAL", "list failed", err.Error()))
+		return
+	}
+
+	ctx := c.Request.Context()
+	out := make([]listingWithImage, 0, len(items))
+	for _, l := range items {
+		lw := listingWithImage{Listing: l}
+
+		if h.images != nil && h.s3 != nil {
+			if imgs, err := h.images.ListByListing(ctx, l.ID); err == nil && len(imgs) > 0 {
+				for _, img := range imgs {
+					if url, err := h.s3.PresignGet(ctx, img.S3Key, h.expiry); err == nil {
+						lw.Images = append(lw.Images, struct {
+							Key string `json:"key"`
+							URL string `json:"url"`
+						}{
+							Key: img.S3Key,
+							URL: url,
+						})
+					}
+				}
+			}
+		}
+
+		out = append(out, lw)
+	}
+
+	c.JSON(http.StatusOK, resp.Data(gin.H{
+		"items":  out,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	}))
+}
+
+// ------------------------ Get single listing ------------------------
+
 func (h *ListingsHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -97,19 +193,28 @@ func (h *ListingsHandler) Get(c *gin.Context) {
 	}
 
 	out := listingWithImage{Listing: l}
+
 	if h.images != nil && h.s3 != nil {
-		if img, err := h.images.GetPrimary(c.Request.Context(), id); err == nil && img != nil {
-			if url, err := h.s3.PresignGet(c.Request.Context(), img.S3Key, h.expiry); err == nil {
-				out.PrimaryImage = &struct {
-					Key string `json:"key"`
-					URL string `json:"url"`
-				}{Key: img.S3Key, URL: url}
+		ctx := c.Request.Context()
+		if imgs, err := h.images.ListByListing(ctx, id); err == nil && len(imgs) > 0 {
+			for _, img := range imgs {
+				if url, err := h.s3.PresignGet(ctx, img.S3Key, h.expiry); err == nil {
+					out.Images = append(out.Images, struct {
+						Key string `json:"key"`
+						URL string `json:"url"`
+					}{
+						Key: img.S3Key,
+						URL: url,
+					})
+				}
 			}
 		}
 	}
 
 	c.JSON(http.StatusOK, resp.Data(out))
 }
+
+// ------------------------ List with filters (public / generic) ------------------------
 
 func (h *ListingsHandler) List(c *gin.Context) {
 	q := c.Query("q")
@@ -142,27 +247,41 @@ func (h *ListingsHandler) List(c *gin.Context) {
 	}
 
 	items, total, err := h.repo.List(c.Request.Context(), repository.ListParams{
-		Q: q, Category: category, PriceMin: pminPtr, PriceMax: pmaxPtr,
-		Status: status, Limit: limit, Offset: offset, Sort: sort,
+		Q:        q,
+		Category: category,
+		PriceMin: pminPtr,
+		PriceMax: pmaxPtr,
+		Status:   status,
+		Limit:    limit,
+		Offset:   offset,
+		Sort:     sort,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, resp.Err("INTERNAL", "list failed", err.Error()))
 		return
 	}
 
+	ctx := c.Request.Context()
 	out := make([]listingWithImage, 0, len(items))
 	for _, l := range items {
 		lw := listingWithImage{Listing: l}
+
 		if h.images != nil && h.s3 != nil {
-			if img, err := h.images.GetPrimary(c.Request.Context(), l.ID); err == nil && img != nil {
-				if url, err := h.s3.PresignGet(c.Request.Context(), img.S3Key, h.expiry); err == nil {
-					lw.PrimaryImage = &struct {
-						Key string `json:"key"`
-						URL string `json:"url"`
-					}{Key: img.S3Key, URL: url}
+			if imgs, err := h.images.ListByListing(ctx, l.ID); err == nil && len(imgs) > 0 {
+				for _, img := range imgs {
+					if url, err := h.s3.PresignGet(ctx, img.S3Key, h.expiry); err == nil {
+						lw.Images = append(lw.Images, struct {
+							Key string `json:"key"`
+							URL string `json:"url"`
+						}{
+							Key: img.S3Key,
+							URL: url,
+						})
+					}
 				}
 			}
 		}
+
 		out = append(out, lw)
 	}
 
@@ -173,6 +292,8 @@ func (h *ListingsHandler) List(c *gin.Context) {
 		"offset": offset,
 	}))
 }
+
+// ------------------------ Update / MarkSold / Delete ------------------------
 
 type updateListingReq struct {
 	Title       *string               `json:"title"`
