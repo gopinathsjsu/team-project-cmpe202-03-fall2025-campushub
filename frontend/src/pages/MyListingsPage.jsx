@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+/* eslint-disable no-unused-vars */
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, Loader2, Package, DollarSign, ShoppingBag, CheckCircle, Edit, Trash2, Eye, ToggleLeft, ToggleRight} from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
@@ -10,6 +11,7 @@ export default function MyListingsPage() {
   const navigate = useNavigate();
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
+  const hasLoadedRef = useRef(false);
   const [filterTab, setFilterTab] = useState("all"); 
   const [stats, setStats] = useState({
     total: 0,
@@ -19,8 +21,17 @@ export default function MyListingsPage() {
   });
 
   useEffect(() => {
-    loadMyListings();
+    if (!hasLoadedRef.current) { // Only run once
+      hasLoadedRef.current = true;
+      loadMyListings();
+    }
   }, []);
+
+  useEffect(() => {
+    if (listings.length > 0) {
+      calculateStats(listings);
+    }
+  }, [listings]);
 
   const loadMyListings = async () => {
     setLoading(true);
@@ -30,7 +41,7 @@ export default function MyListingsPage() {
       const myItems = responseData.items || [];
 
       setListings(myItems);
-      calculateStats(myItems);
+      
     } catch (error) {
       console.error("Failed to load listings:", error);
       toast.error("Failed to load your listings");
@@ -45,7 +56,8 @@ export default function MyListingsPage() {
     const sold = items.filter((item) => item.status === "sold").length;     
     const revenue = items
         .filter((item) => item.status === "sold")
-        .reduce((sum, item) => sum + item.price, 0);
+        .reduce((sum, item) => sum + item.price, 0)
+        .toFixed(2);
 
     setStats({ total, active, sold, revenue });
   };
@@ -56,13 +68,14 @@ export default function MyListingsPage() {
   
     try {
         const res = await api.markAsSold(item.id);
-        const updated = res.data || res;
 
         setListings((prevListings) => {
         const newListings = prevListings.map((listing) =>
-            listing.id === item.id ? updated : listing
+            listing.id === item.id 
+            ? { ...listing, status: "sold" }  
+            : listing
         );
-        calculateStats(newListings);
+       
         return newListings;
         });
 
@@ -86,7 +99,7 @@ export default function MyListingsPage() {
     try {
       await api.deleteListing(item.id);
       setListings((prev) => prev.filter((listing) => listing.id !== item.id));
-      calculateStats(listings.filter((listing) => listing.id !== item.id));
+     
       toast.success("Listing deleted successfully!", { id: toastId });
     } catch (error) {
       toast.error("Failed to delete listing", { id: toastId });

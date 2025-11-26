@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { WebSocketProvider } from './context/WebSocketContext';
 
 import NavBar from "./components/NavBar";
 
@@ -99,9 +100,11 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter>
+    <WebSocketProvider>
       <AuthProvider>
         <AppContent />
       </AuthProvider>
+      </WebSocketProvider>
     </BrowserRouter>
   );
 }

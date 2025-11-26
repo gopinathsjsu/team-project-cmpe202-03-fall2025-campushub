@@ -1,35 +1,92 @@
 /* eslint-disable no-unused-vars */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { X, Send, Loader2, ExternalLink, Tag, DollarSign } from "lucide-react";
+import { X, Send, Loader2, ExternalLink, Tag, DollarSign, Wifi, WifiOff } from "lucide-react";
 import api from "../api/apiClient";
+import { useWS } from "../context/WebSocketContext";
+
 
 export default function ChatbotModal({ onClose }) {
     const [q, setQ] = useState("used textbook for cmpe202");
     const [answer, setAnswer] = useState("");
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
+    const { connected, error, sendMessage, subscribe, unsubscribe } = useWS();
+    const currentRequestId = useRef(null);
+
+    useEffect(() => {
+    if (connected) {
+      console.log('Chat WebSocket connected!');
+      
+    }
+    }, [connected]);
+
+     useEffect(() => {
+        if (!connected) return;
+
+        const handleAgentResponse = (event) => {
+            console.log('Received agent response:', event);
+            
+            // Only process if this response matches our current request
+            if (event.requestId === currentRequestId.current) {
+                setLoading(false);
+                setAnswer(event.payload.answer || "No response from AI");
+                setResults(event.payload.results || []);
+                currentRequestId.current = null; // Clear after processing
+            }
+        };
+
+        const handleError = (event) => {
+            console.error('Received error:', event);
+            
+            // Only process if this error matches our current request
+            if (event.requestId === currentRequestId.current) {
+                setLoading(false);
+                setAnswer(event.payload.message || "Sorry, I couldn't process your request. Please try again.");
+                setResults([]);
+                currentRequestId.current = null;
+            }
+        };
+
+        // Subscribe to both response and error events
+        subscribe('agent.response', handleAgentResponse);
+        subscribe('error', handleError);
+
+        // Cleanup subscriptions on unmount
+        return () => {
+            unsubscribe('agent.response', handleAgentResponse);
+            unsubscribe('error', handleError);
+        };
+    }, [connected, subscribe, unsubscribe]);
 
     const ask = async () => {
         if (!q.trim()) return;
 
-        setLoading(true);
+       setLoading(true);
+        setAnswer("");
+        setResults([]);
+        
+        const requestId = `req-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        currentRequestId.current = requestId;
+
         try {
-            const res = await api.chatbotSearch(q);
-            setAnswer(res.answer);
-            setResults(res.results);
+            // Send agent.search event via WebSocket
+            sendMessage({
+                type: "agent.search",
+                requestId: requestId,
+                payload: {
+                    query: q
+                }
+            });
+
+            console.log('Sent agent.search:', { requestId, query: q });
         } catch (error) {
-            setAnswer(
-                "Sorry, I couldn't process your request. Please try again."
-            );
-        } finally {
+            console.error('Error sending message:', error);
             setLoading(false);
+            setAnswer("Failed to send request. Please try again.");
+            currentRequestId.current = null;
         }
     };
-
-    useEffect(() => {
-        ask();
-    }, []);
 
     const handleKeyPress = (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -38,7 +95,7 @@ export default function ChatbotModal({ onClose }) {
         }
     };
 
-    return (
+     return (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
             <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in slide-in-from-bottom duration-300">
                 {/* Header */}
@@ -63,9 +120,22 @@ export default function ChatbotModal({ onClose }) {
                             <h2 className="text-lg font-bold text-white">
                                 AI Search Assistant
                             </h2>
-                            <p className="text-xs text-primary-100">
-                                Ask me anything about listings
-                            </p>
+                            <div className="flex items-center space-x-2">
+                                <p className="text-xs text-primary-100">
+                                    Powered by Gemini AI
+                                </p>
+                                {connected ? (
+                                    <div className="flex items-center space-x-1 text-green-300">
+                                        <Wifi size={12} />
+                                        <span className="text-xs">Connected</span>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center space-x-1 text-yellow-300">
+                                        <WifiOff size={12} />
+                                        <span className="text-xs">Connecting...</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     <button
@@ -76,9 +146,17 @@ export default function ChatbotModal({ onClose }) {
                     </button>
                 </div>
 
-                {/* Content */}
+                
                 <div className="p-6 max-h-[70vh] overflow-y-auto">
-                    {/* Search Input */}
+                 
+                    {error && (
+                        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p className="text-sm text-yellow-800">
+                                ⚠️ Using fallback mode. Some features may be limited.
+                            </p>
+                        </div>
+                    )}
+
                     <div className="mb-6">
                         <div className="flex gap-2">
                             <input
@@ -91,7 +169,7 @@ export default function ChatbotModal({ onClose }) {
                             />
                             <button
                                 onClick={ask}
-                                disabled={loading}
+                                disabled={loading || !q.trim()}
                                 className="px-6 py-3 rounded-xl bg-gradient-to-r from-primary-500 to-primary-700 text-white font-medium hover:from-primary-600 hover:to-primary-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 flex items-center space-x-2 shadow-md hover:shadow-lg"
                             >
                                 {loading ? (
@@ -111,11 +189,10 @@ export default function ChatbotModal({ onClose }) {
                             </button>
                         </div>
                         <p className="text-xs text-gray-500 mt-2 ml-1">
-                            Try: "MacBook under $500" or "Calculus textbook"
+                            Try: "MacBook under $500" or "Calculus textbook" or "furniture for dorm"
                         </p>
                     </div>
 
-                    {/* AI Answer */}
                     {answer && (
                         <div className="mb-6 p-4 bg-gradient-to-r from-primary-50 to-accent-50 rounded-xl border border-primary-100">
                             <div className="flex items-start space-x-3">
@@ -134,11 +211,11 @@ export default function ChatbotModal({ onClose }) {
                                         />
                                     </svg>
                                 </div>
-                                <div>
+                                <div className="flex-1">
                                     <p className="text-sm font-medium text-primary-900 mb-1">
                                         AI Response:
                                     </p>
-                                    <p className="text-sm text-gray-700 leading-relaxed">
+                                    <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
                                         {answer}
                                     </p>
                                 </div>
@@ -146,7 +223,7 @@ export default function ChatbotModal({ onClose }) {
                         </div>
                     )}
 
-                    {/* Results */}
+             
                     {results.length > 0 ? (
                         <div className="space-y-3">
                             <h3 className="text-sm font-semibold text-gray-900 mb-3">
@@ -163,12 +240,15 @@ export default function ChatbotModal({ onClose }) {
                                             <h4 className="font-semibold text-gray-900 mb-2 line-clamp-1">
                                                 {r.title}
                                             </h4>
+                                            <p className="text-xs text-gray-600 mb-2 line-clamp-2">
+                                                {r.description}
+                                            </p>
                                             <div className="flex flex-wrap items-center gap-3 text-sm">
                                                 <span className="inline-flex items-center space-x-1 text-gray-600">
                                                     <Tag size={14} />
                                                     <span>{r.category}</span>
                                                 </span>
-                                                <span className="inline-flex items-center space-x-1 text-accent-700 font-semibold">
+                                                <span className="inline-flex items-center space-x-1 text-green-700 font-semibold">
                                                     <DollarSign size={14} />
                                                     <span>{r.price}</span>
                                                 </span>
@@ -212,15 +292,15 @@ export default function ChatbotModal({ onClose }) {
                         )
                     )}
 
-                    {/* Loading State */}
-                    {loading && !answer && (
+                 
+                    {loading && (
                         <div className="flex flex-col items-center justify-center py-12">
                             <Loader2
                                 size={40}
                                 className="text-primary-500 animate-spin mb-3"
                             />
                             <p className="text-sm text-gray-600">
-                                Searching listings...
+                                AI is searching listings...
                             </p>
                         </div>
                     )}

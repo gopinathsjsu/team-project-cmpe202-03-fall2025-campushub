@@ -3,10 +3,12 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import {ArrowLeft, Tag, DollarSign, Package, User, MessageCircle, Flag, CheckCircle, XCircle, Loader2, Calendar, AlertCircle, ChevronLeft, ChevronRight} from "lucide-react";
 import api from "../api/apiClient";
-//import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/AuthContext";
+import ReportModal from "../components/ReportModal";
+import toast, { Toaster } from "react-hot-toast";
 
 export default function ListingDetailPage() {
-  //const { userId } = useAuth();
+  const { userId } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const [item, setItem] = useState(null);
@@ -14,6 +16,7 @@ export default function ListingDetailPage() {
   const [error, setError] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
 
   useEffect(() => {
     loadListing();
@@ -34,9 +37,27 @@ export default function ListingDetailPage() {
     }
   };
 
-  //const toggleSold = async ()=>{ const updated=await api.updateListing(item.id,{sold:!item.sold}); setItem(updated); };
-  const report = async ()=>{ const reason=prompt("Reason for report?"); if(!reason) return; await api.reportListing(item.id,reason); alert("Reported!"); };
+  const handleReport = () => {
+    setReportModalOpen(true);
+  };
 
+  const handleSubmitReport = async (reason) => {
+    const toastId = toast.loading("Submitting report...");
+    
+    try {
+      await api.reportListing(item.id, reason, userId);
+      setReportModalOpen(false);
+      toast.success("Thank you! Your report has been submitted to the Admin team for review.", { 
+        id: toastId,
+        duration: 4000 
+      });
+    } catch (error) {
+      console.error("Failed to submit report:", error);
+      toast.error("Failed to submit report. Please try again.", { 
+        id: toastId 
+      });
+    }
+  };
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleDateString("en-US", {
@@ -100,6 +121,7 @@ export default function ListingDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <Toaster position="top-center" />
       {/* Header */}
       <div className="bg-white border-b sticky top-0 z-10 shadow-sm">
         <div className="mx-auto max-w-7xl px-4 py-4">
@@ -259,7 +281,7 @@ export default function ListingDetailPage() {
             {/* Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-2">
               <button
-                onClick={report}
+                onClick={handleReport}
                 disabled={actionLoading}
                 className="flex items-center justify-center space-x-2 px-4 py-2.5 rounded-lg border-2 border-red-300 text-red-600 hover:bg-red-50 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
@@ -274,7 +296,12 @@ export default function ListingDetailPage() {
           </div>
         </div>
       </div>
-           
+          <ReportModal
+        isOpen={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        onSubmit={handleSubmitReport}
+        listingTitle={item?.title}
+      />  
       
     </div>
   );

@@ -4,6 +4,7 @@ import mockApi from "./mockApi";
 const USE_MOCK = false; // flip false when backend is ready
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
 
+
 const getAuthToken = () => {
   return localStorage.getItem("authToken");
 };
@@ -160,12 +161,17 @@ const api = {
     });
   },
 
-  async reportListing(id, reason) {
-    if (USE_MOCK) return mockApi.reportListing(id, reason);
-    return fetchAPI(`/listings/${id}/report`, {
+  async reportListing(listingId, reason, reporterId) {
+    if (USE_MOCK) return mockApi.reportListing(listingId, reason);
+    
+    return fetchAPI(`/reports`, {
       method: "POST",
       auth: true,
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ 
+        listingId, 
+        reporterId,
+        reason 
+      }),
     });
   },
 
@@ -245,10 +251,24 @@ const api = {
 
   // ==================== AI Chatbot ====================
 
-  async chatbotSearch(query) {
+  chatbotSearch: async (query) => {
     if (USE_MOCK) return mockApi.chatbotSearch(query);
-    return fetchAPI("/agent", {
-      method: "POST",
+    
+    if (wsInstance && wsInstance.connected) {
+      try {
+        const response = await wsInstance.sendMessage('agent.search', { query });
+        return {
+          answer: response.answer,
+          results: response.results || []
+        };
+      } catch (error) {
+        console.error('WebSocket search failed:', error);
+       
+      }
+    }
+    
+    return fetchAPI('/chatbot/search', {
+      method: 'POST',
       body: JSON.stringify({ query }),
     });
   },

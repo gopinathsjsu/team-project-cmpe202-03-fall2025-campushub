@@ -7,11 +7,15 @@ import SearchBar from "../components/SearchBar";
 import Filters from "../components/Filters";
 import ListingCard from "../components/ListingCard";
 import EmptyState from "../components/EmptyState";
+import { useAuth } from "../context/AuthContext";
+import ReportModal from "../components/ReportModal";
+import toast, { Toaster } from "react-hot-toast";
 
 const ITEMS_PER_PAGE = 12;
 
 export default function BrowsePage() {
     
+    const { userId } = useAuth();
     const [q, setQ] = useState("");
     const [category, setCategory] = useState("All");
     const [minPrice, setMinPrice] = useState("");
@@ -21,6 +25,8 @@ export default function BrowsePage() {
     const [error, setError] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [totalItems, setTotalItems] = useState(0);
+    const [reportModalOpen, setReportModalOpen] = useState(false);
+    const [reportingItem, setReportingItem] = useState(null);
 
     const load = async (page=1) => {
         setLoading(true);
@@ -64,18 +70,26 @@ export default function BrowsePage() {
         window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
-    const handleReport = async (item) => {
-        const reason = prompt(
-            "Please provide a reason for reporting this listing:"
-        );
-        if (!reason || !reason.trim()) return;
+     const handleReport = (item) => {
+        setReportingItem(item);
+        setReportModalOpen(true);
+    };
+
+   const handleSubmitReport = async (reason) => {
+     const toastId = toast.loading("Submitting report...");
         try {
-            await api.reportListing(item.id, reason);
-            alert(
-                "Thank you! Your report has been submitted to the Admin team for review."
-            );
+            await api.reportListing(reportingItem.id, reason, userId);
+            setReportModalOpen(false);
+            setReportingItem(null);
+            toast.success("Thank you! Your report has been submitted to the Admin team for review.", { 
+                id: toastId,
+                duration: 4000 
+            });
         } catch (error) {
-            alert("Failed to submit report. Please try again.");
+            console.error("Failed to submit report:", error);
+            toast.error("Failed to submit report. Please try again.", { 
+                id: toastId 
+            });
         }
     };
 
@@ -84,6 +98,7 @@ export default function BrowsePage() {
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+             <Toaster position="top-center" />
             {/* Hero Section */}
             <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-xl">
                 <div className="mx-auto max-w-7xl px-4 py-8">
@@ -219,7 +234,7 @@ export default function BrowsePage() {
                             {/* Pagination */}
                             {totalPages > 1 && (
                                 <div className="flex items-center justify-center gap-2 mt-8 pb-8">
-                                    {/* Previous Button */}
+                                
                                     <button
                                         onClick={() => handlePageChange(currentPage - 1)}
                                         disabled={currentPage === 1}
@@ -280,6 +295,15 @@ export default function BrowsePage() {
                     ) : null}
                 </div>
             </div>
+            <ReportModal
+                isOpen={reportModalOpen}
+                onClose={() => {
+                    setReportModalOpen(false);
+                    setReportingItem(null);
+                }}
+                onSubmit={handleSubmitReport}
+                listingTitle={reportingItem?.title}
+            />
         </div>
     );
 }
