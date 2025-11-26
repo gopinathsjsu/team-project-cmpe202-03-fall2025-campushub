@@ -12,6 +12,7 @@ import ListingDetailPage from "./pages/ListingDetailPage";
 import ChatPage from "./pages/ChatPage";
 import AdminPage from "./pages/AdminPage";
 import MyListingsPage from "./pages/MyListingsPage";
+import EditListingPage from "./pages/EditListingPage";
 
 // Protected Route Component
 function ProtectedRoute({ children, requireAdmin = false }) {
@@ -89,6 +90,7 @@ function AppContent() {
             <AdminPage />
           </ProtectedRoute>
         } />
+        <Route path="/listing/:id/edit" element={<EditListingPage />} />
       </Routes>
     </div>
   );

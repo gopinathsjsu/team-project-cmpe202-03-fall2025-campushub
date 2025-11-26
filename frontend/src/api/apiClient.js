@@ -104,12 +104,12 @@ const api = {
     });
     
     const queryString = queryParams.toString();
-    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`);
+    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`,{auth:true});
   },
 
   async getListing(id) {
     if (USE_MOCK) return mockApi.getListing(id);
-    return fetchAPI(`/listings/${id}`);
+    return fetchAPI(`/listings/${id}`,{ auth: true });
   },
 
   async createListing(payload) {
@@ -146,6 +146,20 @@ const api = {
     });
   },
 
+  async getMyListings() {
+    if (USE_MOCK) {
+      const userId = localStorage.getItem("userId");
+      return mockApi.listListings({}).then(res => {
+        const filtered = res.items.filter(item => item.sellerId === userId);
+        return { data: { items: filtered, total: filtered.length } };
+      });
+    }
+    
+    return fetchAPI("/listings/mine", {
+      auth: true,
+    });
+  },
+
   async reportListing(id, reason) {
     if (USE_MOCK) return mockApi.reportListing(id, reason);
     return fetchAPI(`/listings/${id}/report`, {
@@ -164,6 +178,7 @@ const api = {
   async presignUpload(fileName, contentType) {    
     return fetchAPI("/uploads/presign", {
       method: "POST",
+      auth: true,
       body: JSON.stringify({ fileName, contentType }),
     });
   },
@@ -175,6 +190,7 @@ const api = {
     
     const response = await fetch(presignedUrl, {
       method: "PUT",
+      auth:true,
       headers: {
         "Content-Type": contentType,
       },
@@ -192,10 +208,10 @@ const api = {
    * Step 3: Complete upload and attach to listing
    */
   async completeUpload(listingId, key, isPrimary = false) {
-    console.log(listingId);
-    
+   
     return fetchAPI("/uploads/complete", {
       method: "POST",
+      auth: true,
       body: JSON.stringify({ listingId, key, isPrimary }),
     });
   },

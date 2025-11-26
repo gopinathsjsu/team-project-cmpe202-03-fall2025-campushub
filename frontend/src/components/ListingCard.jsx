@@ -8,8 +8,8 @@ export default function ListingCard({ item, onToggleSold, onReport }) {
             <div className="relative aspect-video w-full bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden">
                 {item.images?.[0] ? (
                     <img
-                        src={item.images[0]}
-                        alt={item.title}
+                        src={item.images[0].url}
+                        alt={item.key}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                 ) : (

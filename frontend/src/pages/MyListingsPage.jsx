@@ -25,13 +25,9 @@ export default function MyListingsPage() {
   const loadMyListings = async () => {
     setLoading(true);
     try {
-      // Get all listings and filter by current user's sellerId
-      const res = await api.listListings({ limit: 100 });
+      const res = await api.getMyListings();
       const responseData = res.data || res;
-      const allItems = responseData.items || [];
-
-      // Filter by current user
-      const myItems = allItems.filter((item) => item.sellerId === userId);
+      const myItems = responseData.items || [];
 
       setListings(myItems);
       calculateStats(myItems);
@@ -45,44 +41,37 @@ export default function MyListingsPage() {
 
   const calculateStats = (items) => {
     const total = items.length;
-    const active = items.filter((item) => !item.sold).length;
-    const sold = items.filter((item) => item.sold).length;
+    const active = items.filter((item) => item.status === "active").length; 
+    const sold = items.filter((item) => item.status === "sold").length;     
     const revenue = items
-      .filter((item) => item.sold)
-      .reduce((sum, item) => sum + item.price, 0);
+        .filter((item) => item.status === "sold")
+        .reduce((sum, item) => sum + item.price, 0);
 
     setStats({ total, active, sold, revenue });
   };
 
   const handleToggleSold = async (item) => {
-  console.log("Toggle clicked for item:", item.id, "Current sold status:", item.sold);
+ 
+    const toastId = toast.loading("Updating listing...");
   
-  const toastId = toast.loading("Updating listing...");
-  
-  try {
-    const res = await api.updateListing(item.id, { sold: !item.sold });
-    const updated = res.data || res;
-    
-    console.log("API response:", updated);
-    console.log("New sold status:", updated.sold);
+    try {
+        const res = await api.markAsSold(item.id);
+        const updated = res.data || res;
 
-    setListings((prevListings) => {
-      const newListings = prevListings.map((listing) =>
-        listing.id === item.id ? updated : listing
-      );
-      calculateStats(newListings);
-      return newListings;
-    });
+        setListings((prevListings) => {
+        const newListings = prevListings.map((listing) =>
+            listing.id === item.id ? updated : listing
+        );
+        calculateStats(newListings);
+        return newListings;
+        });
 
-    toast.success(
-      updated.sold ? "Marked as sold!" : "Marked as available!",
-      { id: toastId }
-    );
-  } catch (error) {
-    console.error("Toggle error:", error);
-    toast.error("Failed to update listing", { id: toastId });
-  }
-};
+        toast.success("Marked as sold!", { id: toastId });
+    } catch (error) {
+        console.error("Toggle error:", error);
+        toast.error("Failed to update listing", { id: toastId });
+    }
+    };
 
   const handleDelete = async (item) => {
     if (
@@ -105,8 +94,8 @@ export default function MyListingsPage() {
   };
 
   const filteredListings = listings.filter((item) => {
-    if (filterTab === "active") return !item.sold;
-    if (filterTab === "sold") return item.sold;
+    if (filterTab === "active") return item.status === "active"; 
+    if (filterTab === "sold") return item.status === "sold";  
     return true;
   });
 
@@ -128,7 +117,7 @@ export default function MyListingsPage() {
           <div className="mx-auto max-w-7xl px-4 py-8">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div>
-                <h1 className="text-3xl md:text-4xl font-bold mb-2">
+                <h1 className="text-3xl md:text-4xl font-bold mb-2 text-white">
                   My Listings
                 </h1>
                 <p className="text-primary-100">
@@ -288,8 +277,8 @@ export default function MyListingsPage() {
                   <div className="relative aspect-video bg-gradient-to-br from-gray-100 to-gray-200">
                     {item.images?.[0] ? (
                       <img
-                        src={item.images[0]}
-                        alt={item.title}
+                        src={item.images[0].url}
+                        alt={item.key}
                         className="w-full h-full object-cover"
                       />
                     ) : (
@@ -326,18 +315,28 @@ export default function MyListingsPage() {
                       <span className="text-sm font-medium text-gray-700">
                         Mark as Sold
                       </span>
-                      <button
+                    
+                        {item.status === "sold" && (  
+                        <div className="absolute top-3 right-3 bg-red-500 text-white px-3 py-1 rounded-lg text-xs font-bold shadow-lg">
+                            SOLD
+                        </div>
+                        )}
+
+                        <button
                         onClick={() => handleToggleSold(item)}
+                        disabled={item.status === "sold"} 
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                          item.sold ? 'bg-red-500' : 'bg-green-500'
+                            item.status === "sold" 
+                            ? 'bg-red-500 cursor-not-allowed opacity-50' 
+                            : 'bg-green-500'
                         }`}
-                      >
+                        >
                         <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            item.sold ? 'translate-x-6' : 'translate-x-1'
-                          }`}
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            item.status === "sold" ? 'translate-x-6' : 'translate-x-1'
+                            }`}
                         />
-                      </button>
+                        </button>
                     </div>
 
                     {/* Action Buttons */}

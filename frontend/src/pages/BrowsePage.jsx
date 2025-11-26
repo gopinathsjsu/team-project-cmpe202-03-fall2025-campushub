@@ -79,17 +79,6 @@ export default function BrowsePage() {
         }
     };
 
-    // const handleToggleSold = async (item) => {
-    //     try {
-    //         const updated = await api.updateListing(item.id, {
-    //             sold: !item.sold,
-    //         });
-    //         setData((d) => d.map((x) => (x.id === item.id ? updated : x)));
-    //     } catch (error) {
-    //         alert("Failed to update listing status. Please try again.");
-    //     }
-    // };
-
     const hasFilters = q || category !== "All" || minPrice || maxPrice;
     const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
 
