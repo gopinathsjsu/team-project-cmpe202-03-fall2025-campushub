@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -30,10 +31,13 @@ type AgentService struct {
 	logger        *zap.Logger
 }
 
+// ====== Helper: keyword expansion ======
+
 // expandKeywords adds variants like "cmpe 202" / "cmpe-202" for tokens such as "cmpe202".
 func expandKeywords(src []string) []string {
 	var out []string
 	seen := map[string]struct{}{}
+
 	add := func(s string) {
 		s = strings.ToLower(strings.TrimSpace(s))
 		if s == "" {
@@ -45,8 +49,10 @@ func expandKeywords(src []string) []string {
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
+
 	for _, tok := range src {
 		add(tok)
+
 		t := strings.ToLower(strings.TrimSpace(tok))
 		if t == "" {
 			continue
@@ -61,6 +67,7 @@ func expandKeywords(src []string) []string {
 	}
 	return out
 }
+
 func splitAlphaNumeric(s string) (alpha, numeric string) {
 	i := -1
 	for idx, r := range s {
@@ -73,6 +80,7 @@ func splitAlphaNumeric(s string) (alpha, numeric string) {
 		return "", ""
 	}
 	alpha, numeric = s[:i], s[i:]
+
 	for _, r := range alpha {
 		if r < 'a' || r > 'z' {
 			return "", ""
@@ -86,6 +94,82 @@ func splitAlphaNumeric(s string) (alpha, numeric string) {
 	return
 }
 
+// ====== Helper: course-code based narrowing (CMPE 202, MATH 133A, etc.) ======
+
+// courseCodeRe matches patterns like "CMPE 202", "cmpe-202", "MATH 133A"
+var courseCodeRe = regexp.MustCompile(`(?i)\b([a-z]{2,5})\s*[- ]?\s*(\d{2,3}[a-z]?)\b`)
+
+// extractCourseTokens pulls out course-like tokens from the query and returns
+// variants ("cmpe202", "cmpe 202", "cmpe-202").
+func extractCourseTokens(text string) []string {
+	text = strings.ToLower(text)
+	matches := courseCodeRe.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	var raw []string
+	for _, m := range matches {
+		if len(m) < 3 {
+			continue
+		}
+		alpha := strings.TrimSpace(m[1])
+		num := strings.TrimSpace(m[2])
+		if alpha == "" || num == "" {
+			continue
+		}
+		raw = append(raw,
+			alpha+num,     // cmpe202
+			alpha+" "+num, // cmpe 202
+			alpha+"-"+num, // cmpe-202
+		)
+	}
+
+	if len(raw) == 0 {
+		return nil
+	}
+	return expandKeywords(raw) // dedup + normalize
+}
+
+// filterListingsByStrongTokens keeps only listings whose title/description
+// contains any of the strong course tokens. If none match, it falls back
+// to the original slice (so generic queries still work).
+func filterListingsByStrongTokens(query string, listings []domain.Listing) []domain.Listing {
+	tokens := extractCourseTokens(query)
+	if len(tokens) == 0 {
+		// no course-like tokens -> don't filter
+		return listings
+	}
+
+	var filtered []domain.Listing
+	for _, l := range listings {
+		text := strings.ToLower(l.Title + " " + l.Description)
+		matched := false
+		for _, tok := range tokens {
+			tok = strings.ToLower(strings.TrimSpace(tok))
+			if tok == "" {
+				continue
+			}
+			if strings.Contains(text, tok) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			filtered = append(filtered, l)
+		}
+	}
+
+	// If we found at least one exact-ish match, return those.
+	// Otherwise, keep original results so user still sees something.
+	if len(filtered) > 0 {
+		return filtered
+	}
+	return listings
+}
+
+// ====== Robust DB search with retries ======
+
 // searchListingsWithRetries tries multiple Q variants and relaxes filters if needed.
 func (s *AgentService) searchListingsWithRetries(ctx context.Context, intent *SearchIntent) ([]domain.Listing, error) {
 	base := repository.ListParams{
@@ -97,11 +181,15 @@ func (s *AgentService) searchListingsWithRetries(ctx context.Context, intent *Se
 		Offset:   0,
 		Sort:     "created_desc",
 	}
+
 	var variants []string
 	if len(intent.Keywords) > 0 {
+		// expanded keywords first (cmpe202 / cmpe 202 / cmpe-202)
 		variants = append(variants, strings.Join(expandKeywords(intent.Keywords), " "))
+		// raw keywords
 		variants = append(variants, strings.Join(intent.Keywords, " "))
 	}
+	// also try with empty q
 	variants = append(variants, "")
 
 	type attempt struct {
@@ -116,24 +204,25 @@ func (s *AgentService) searchListingsWithRetries(ctx context.Context, intent *Se
 		p.Q = q
 		tries = append(tries, attempt{p, "category+q"})
 	}
-	// B: drop category
+	// B: drop category, keep q
 	for _, q := range variants {
 		p := base
 		p.Category = ""
 		p.Q = q
 		tries = append(tries, attempt{p, "q-only"})
 	}
-	// C: broad
+	// C: broad — drop category, drop q
 	tries = append(tries, attempt{base, "broad-no-q-no-category"})
 	tries[len(tries)-1].p.Category = ""
 	tries[len(tries)-1].p.Q = ""
 
 	for _, t := range tries {
-		s.logger.Info("chat search attempt",
+		s.logger.Info("search attempt",
 			zap.String("reason", t.reason),
 			zap.String("q", t.p.Q),
 			zap.String("category", t.p.Category),
-			zap.Any("min", t.p.PriceMin), zap.Any("max", t.p.PriceMax),
+			zap.Any("min", t.p.PriceMin),
+			zap.Any("max", t.p.PriceMax),
 		)
 		items, _, err := s.listingsRepo.List(ctx, t.p)
 		if err != nil {
@@ -146,13 +235,15 @@ func (s *AgentService) searchListingsWithRetries(ctx context.Context, intent *Se
 	return nil, nil
 }
 
+// ====== Chat entrypoint (WS event: chat.message → pubsub.chat.request → here) ======
+
 func (s *AgentService) ProcessChat(ctx context.Context, text string) (string, []pubsub.ListingInfo, error) {
 	t := strings.TrimSpace(text)
 	l := strings.ToLower(t)
 
 	// Very light small-talk router
 	if isGreeting(l) {
-		return "Hey! 👋 What are you looking for today? You can say things like “used CMPE 202 textbook under $40”.", nil, nil
+		return "Hey! 👋 I’m the CampusHub assistant. Tell me what you’re looking for, like “used CMPE 202 textbook under $40”.", nil, nil
 	}
 	if isThanks(l) {
 		return "You’re welcome! If you want, tell me a course or item and I’ll check what’s available.", nil, nil
@@ -160,20 +251,29 @@ func (s *AgentService) ProcessChat(ctx context.Context, text string) (string, []
 
 	// Treat as product search
 	intent := &SearchIntent{Keywords: []string{}}
+
+	// 1) Try LLM intent
 	if strings.TrimSpace(s.apiKey) != "" {
 		if aiIntent, err := s.extractSearchIntent(ctx, t); err == nil {
 			intent = aiIntent
 		}
 	}
-	// Heuristic backup if LLM was empty or too vague
+
+	// 2) Heuristic backup if LLM was empty or too vague
 	if len(intent.Keywords) == 0 && intent.Category == "" && intent.MinPrice == nil && intent.MaxPrice == nil {
 		intent = s.simpleIntentFromText(l)
 	}
 
-	items, err := s.searchListingsWithRetries(ctx, intent) // uses robust keyword expansion
+	// 3) Robust search with retries
+	items, err := s.searchListingsWithRetries(ctx, intent)
 	if err != nil {
 		return "", nil, err
 	}
+
+	// 4) Extra narrowing for course-like queries (CMPE 202, MATH 133A, ...)
+	items = filterListingsByStrongTokens(text, items)
+
+	// 5) Map to DTOs
 	results := s.toFullListingInfos(ctx, items)
 	answer := s.generateAnswer(t, intent, len(results))
 	return answer, results, nil
@@ -182,9 +282,11 @@ func (s *AgentService) ProcessChat(ctx context.Context, text string) (string, []
 func isGreeting(l string) bool {
 	return strings.Contains(l, "hi") || strings.Contains(l, "hello") || strings.Contains(l, "hey")
 }
+
 func isThanks(l string) bool {
 	return strings.Contains(l, "thanks") || strings.Contains(l, "thank you") || strings.Contains(l, "thx")
 }
+
 func (s *AgentService) simpleIntentFromText(l string) *SearchIntent {
 	intent := &SearchIntent{}
 	if l != "" {
@@ -200,6 +302,8 @@ func (s *AgentService) simpleIntentFromText(l string) *SearchIntent {
 	}
 	return intent
 }
+
+// ====== Constructors ======
 
 // NewAgentService creates a basic agent service (no media enrichment)
 func NewAgentService(apiKey string, listingsRepo repository.ListingRepo, logger *zap.Logger) *AgentService {
@@ -222,16 +326,20 @@ func NewAgentServiceFull(apiKey string, listingsRepo repository.ListingRepo, ima
 	}
 }
 
-// Gemini request/response types
+// ====== Gemini types ======
+
 type GeminiRequest struct {
 	Contents []GeminiContent `json:"contents"`
 }
+
 type GeminiContent struct {
 	Parts []GeminiPart `json:"parts"`
 }
+
 type GeminiPart struct {
 	Text string `json:"text"`
 }
+
 type GeminiResponse struct {
 	Candidates []struct {
 		Content struct {
@@ -250,6 +358,9 @@ type SearchIntent struct {
 	MaxPrice *float64 `json:"maxPrice"`
 }
 
+// ====== Agent entrypoint (WS event: agent.search → pubsub.agent.request → here) ======
+
+// ProcessQuery returns DB results enriched for frontend consumption
 func (s *AgentService) ProcessQuery(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
 	s.logger.Info("ProcessQuery called", zap.String("query", query))
 
@@ -283,19 +394,21 @@ func (s *AgentService) ProcessQuery(ctx context.Context, query string) (string, 
 		zap.Any("max", intent.MaxPrice),
 	)
 
-	// 3) Use the SAME robust search as chat (with keyword expansion + fallback)
+	// 3) Use the same robust search as chat
 	listings, err := s.searchListingsWithRetries(ctx, intent)
 	if err != nil {
 		return "", nil, err
 	}
 
-	// 4) Map to pubsub DTOs and build an answer string
+	// 4) Narrow to course-specific listings if query contains "cmpe 202" etc.
+	listings = filterListingsByStrongTokens(query, listings)
+
+	// 5) Map to DTOs and build an answer string
 	results := s.toFullListingInfos(ctx, listings)
 	answer := s.generateAnswer(query, intent, len(results))
 	return answer, results, nil
 }
 
-// Fallback: simple extraction + DB query
 // Fallback: simple extraction + DB query (no LLM key or LLM failure)
 func (s *AgentService) processWithoutChatGPT(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
 	ql := strings.ToLower(strings.TrimSpace(query))
@@ -310,16 +423,21 @@ func (s *AgentService) processWithoutChatGPT(ctx context.Context, query string) 
 		zap.Any("max", intent.MaxPrice),
 	)
 
-	// IMPORTANT: use the same robust search with retries & keyword expansion
+	// Use the same robust search
 	listings, err := s.searchListingsWithRetries(ctx, intent)
 	if err != nil {
 		return "", nil, err
 	}
 
+	// Narrow by strong tokens if present
+	listings = filterListingsByStrongTokens(query, listings)
+
 	results := s.toFullListingInfos(ctx, listings)
 	answer := s.generateAnswer(query, intent, len(results))
 	return answer, results, nil
 }
+
+// ====== LLM intent extraction ======
 
 func (s *AgentService) extractSearchIntent(ctx context.Context, query string) (*SearchIntent, error) {
 	prompt := `You are a campus marketplace assistant. Analyze the user's query and extract search parameters.
@@ -393,7 +511,9 @@ Now analyze this query: ` + query
 	return &intent, nil
 }
 
-// Build repo params and query DB
+// ====== Optional simple search (still used by some code) ======
+
+// Build repo params and query DB (simple version)
 func (s *AgentService) searchListings(ctx context.Context, intent *SearchIntent) ([]domain.Listing, error) {
 	params := repository.ListParams{
 		Category: intent.Category,
@@ -410,6 +530,8 @@ func (s *AgentService) searchListings(ctx context.Context, intent *SearchIntent)
 	listings, _, err := s.listingsRepo.List(ctx, params)
 	return listings, err
 }
+
+// ====== Answer + DTO mapping ======
 
 // Natural language answer
 func (s *AgentService) generateAnswer(query string, intent *SearchIntent, resultCount int) string {

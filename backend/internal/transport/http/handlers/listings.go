@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -84,8 +85,6 @@ func (h *ListingsHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp.Data(l))
 }
 
-// ------------------------ ListMine (auth user’s listings) ------------------------
-
 func (h *ListingsHandler) ListMine(c *gin.Context) {
 	uidVal, ok := c.Get("userId")
 	if !ok {
@@ -106,6 +105,7 @@ func (h *ListingsHandler) ListMine(c *gin.Context) {
 	}
 
 	status := c.DefaultQuery("status", "active")
+	fmt.Println("Status:", status)
 	sort := c.DefaultQuery("sort", "created_desc")
 
 	var pminPtr, pmaxPtr *float64
@@ -133,13 +133,13 @@ func (h *ListingsHandler) ListMine(c *gin.Context) {
 	}
 
 	items, total, err := h.repo.List(c.Request.Context(), repository.ListParams{
-		Status:   status,
+		Status:   "",
 		PriceMin: pminPtr,
 		PriceMax: pmaxPtr,
 		Limit:    limit,
 		Offset:   offset,
 		Sort:     sort,
-		SellerID: &sellerID, // filter by current user
+		SellerID: &sellerID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, resp.Err("INTERNAL", "list failed", err.Error()))
@@ -178,8 +178,6 @@ func (h *ListingsHandler) ListMine(c *gin.Context) {
 	}))
 }
 
-// ------------------------ Get single listing ------------------------
-
 func (h *ListingsHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -213,8 +211,6 @@ func (h *ListingsHandler) Get(c *gin.Context) {
 
 	c.JSON(http.StatusOK, resp.Data(out))
 }
-
-// ------------------------ List with filters (public / generic) ------------------------
 
 func (h *ListingsHandler) List(c *gin.Context) {
 	q := c.Query("q")
