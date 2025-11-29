@@ -20,7 +20,6 @@ func main() {
 		log.Fatal("config load failed", zap.Error(err))
 	}
 
-	// Get API key (prefer GEMINI_API_KEY, fallback to OPENAI_API_KEY)
 	apiKey := cfg.OpenAIKey
 	if cfg.GeminiKey != "" {
 		apiKey = cfg.GeminiKey
@@ -39,7 +38,6 @@ func main() {
 
 	ctx := context.Background()
 
-	// DB pool
 	pool, err := postgres.NewPool(ctx, cfg.DBDSN)
 	if err != nil {
 		log.Fatal("db connect failed", zap.Error(err))
