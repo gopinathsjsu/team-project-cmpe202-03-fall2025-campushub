@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -48,33 +47,45 @@ func (r *ListingRepoPG) List(ctx context.Context, p repository.ListParams) ([]do
 		i     = 1
 	)
 
-	where = append(where, "status = COALESCE(NULLIF($1,''),'active')")
-	args = append(args, p.Status)
-	i++
+	if p.Status != "" {
+		where = append(where, fmt.Sprintf("status = $%d", i))
+		args = append(args, p.Status)
+		i++
+	}
+
 	if p.SellerID != nil {
-		where = append(where, "seller_id = $"+strconv.Itoa(i))
+		where = append(where, fmt.Sprintf("seller_id = $%d", i))
 		args = append(args, *p.SellerID)
 		i++
 	}
+
 	if p.Category != "" {
 		where = append(where, fmt.Sprintf("category = $%d", i))
 		args = append(args, p.Category)
 		i++
 	}
+
 	if p.Q != "" {
 		where = append(where, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", i, i+1))
 		args = append(args, "%"+p.Q+"%", "%"+p.Q+"%")
 		i += 2
 	}
+
 	if p.PriceMin != nil {
 		where = append(where, fmt.Sprintf("price >= $%d", i))
 		args = append(args, *p.PriceMin)
 		i++
 	}
+
 	if p.PriceMax != nil {
 		where = append(where, fmt.Sprintf("price <= $%d", i))
 		args = append(args, *p.PriceMax)
 		i++
+	}
+
+	// If no filters at all, add a harmless TRUE so WHERE clause is valid
+	if len(where) == 0 {
+		where = append(where, "TRUE")
 	}
 
 	order := "created_at DESC"
@@ -122,7 +133,7 @@ func (r *ListingRepoPG) List(ctx context.Context, p repository.ListParams) ([]do
 		return nil, 0, err
 	}
 
-	// total count
+	// total count (same WHERE, same args)
 	countSQL := fmt.Sprintf(`SELECT count(*) FROM listings WHERE %s`, strings.Join(where, " AND "))
 	var total int
 	if err := r.db.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
