@@ -1,8 +1,8 @@
 // src/api/apiClient.js
 import mockApi from "./mockApi";
 
-const USE_MOCK = true; // flip false when backend is ready
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
+const USE_MOCK = false; // flip false when backend is ready
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8082/v1";
 
 const getAuthToken = () => {
   return localStorage.getItem("authToken");
@@ -35,24 +35,40 @@ const createHeaders = (includeAuth = false, contentType = "application/json") =>
 
 
 const handleResponse = async (response) => {
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({
-      message: `HTTP ${response.status}: ${response.statusText}`
-    }));
-    throw new Error(error.message || "API request failed");
+  const data = await response.json().catch(() => ({
+    error: { message: `HTTP ${response.status}: ${response.statusText}` }
+  }));
+  
+  // Backend returns {data: ...} or {error: ...}
+  if (data.error) {
+    const errorMsg = data.error.message || data.error.details || "API request failed";
+    throw new Error(errorMsg);
   }
-  return response.json();
+  
+  if (!response.ok) {
+    throw new Error(data.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  // Return the data field if present, otherwise return the whole response
+  return data.data !== undefined ? data.data : data;
 };
 
 const fetchAPI = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
-  const response = await fetch(url, {
+  const fetchOptions = {
     ...options,
     headers: {
       ...createHeaders(options.auth, options.contentType),
       ...options.headers,
     },
-  });
+  };
+  
+  // Add body if provided
+  if (options.body) {
+    fetchOptions.body = options.body;
+  }
+  
+  const response = await fetch(url, fetchOptions);
   return handleResponse(response);
 };
 
@@ -60,6 +76,27 @@ const fetchAPI = async (endpoint, options = {}) => {
 const api = {
 
   // ==================== Authentication ====================
+
+  async signUp(payload) {
+    if (USE_MOCK) return mockApi.signUp(payload);
+    return fetchAPI("/auth/sign-up", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async signIn(email, password) {
+    if (USE_MOCK) return mockApi.signIn(email, password);
+    const result = await fetchAPI("/auth/sign-in", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    // Store token if present
+    if (result.token) {
+      setAuthToken(result.token);
+    }
+    return result;
+  },
 
   setToken: (token) => {
     setAuthToken(token);
@@ -85,12 +122,18 @@ const api = {
     });
     
     const queryString = queryParams.toString();
-    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`);
+    // Backend requires auth for listings
+    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`, {
+      auth: true,
+    });
   },
 
   async getListing(id) {
     if (USE_MOCK) return mockApi.getListing(id);
-    return fetchAPI(`/listings/${id}`);
+    // Backend requires auth for listings
+    return fetchAPI(`/listings/${id}`, {
+      auth: true,
+    });
   },
 
   async createListing(payload) {
@@ -127,12 +170,12 @@ const api = {
     });
   },
 
-  async reportListing(id, reason) {
-    if (USE_MOCK) return mockApi.reportListing(id, reason);
-    return fetchAPI(`/listings/${id}/report`, {
+  async reportListing(listingId, reporterId, reason) {
+    if (USE_MOCK) return mockApi.reportListing(listingId, reporterId, reason);
+    return fetchAPI("/reports", {
       method: "POST",
       auth: true,
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ listingId, reporterId, reason }),
     });
   },
 
@@ -146,21 +189,55 @@ const api = {
     });
   },
 
-  // ==================== Admin - Reports ====================
+  // ==================== Reports ====================
 
-  async listReports() {
-    if (USE_MOCK) return mockApi.listReports();
+  async createReport(listingId, reporterId, reason) {
+    if (USE_MOCK) return mockApi.createReport(listingId, reporterId, reason);
     return fetchAPI("/reports", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ listingId, reporterId, reason }),
+    });
+  },
+
+  async listReports(status = "") {
+    if (USE_MOCK) return mockApi.listReports();
+    const query = status ? `?status=${status}` : "";
+    return fetchAPI(`/reports${query}`, {
       auth: true,
     });
   },
 
-  async resolveReport(id, action) {
-    if (USE_MOCK) return mockApi.resolveReport(id, action);
-    return fetchAPI(`/reports/${id}`, {
+  async updateReportStatus(id, status) {
+    if (USE_MOCK) return mockApi.updateReportStatus(id, status);
+    return fetchAPI(`/reports/${id}/status`, {
+      method: "PATCH",
+      auth: true,
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  // ==================== Admin ====================
+
+  async getMetrics() {
+    if (USE_MOCK) return mockApi.getMetrics();
+    return fetchAPI("/admin/metrics", {
+      auth: true,
+    });
+  },
+
+  async listUsers(limit = 20, offset = 0) {
+    if (USE_MOCK) return mockApi.listUsers(limit, offset);
+    return fetchAPI(`/admin/users?limit=${limit}&offset=${offset}`, {
+      auth: true,
+    });
+  },
+
+  async forceRemoveListing(listingId) {
+    if (USE_MOCK) return mockApi.forceRemoveListing(listingId);
+    return fetchAPI(`/admin/listings/${listingId}/remove`, {
       method: "POST",
       auth: true,
-      body: JSON.stringify({ action }),
     });
   },
 };

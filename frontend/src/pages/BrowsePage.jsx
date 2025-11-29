@@ -10,7 +10,7 @@ import ListingCard from "../components/ListingCard";
 import EmptyState from "../components/EmptyState";
 
 export default function BrowsePage() {
-    
+    const { userId } = useAuth();
     const [q, setQ] = useState("");
     const [category, setCategory] = useState("All");
     const [minPrice, setMinPrice] = useState("");
@@ -44,17 +44,21 @@ export default function BrowsePage() {
     }, [q, category, minPrice, maxPrice]);
 
     const handleReport = async (item) => {
+        if (!userId) {
+            alert("Please sign in to report a listing.");
+            return;
+        }
         const reason = prompt(
             "Please provide a reason for reporting this listing:"
         );
         if (!reason || !reason.trim()) return;
         try {
-            await api.reportListing(item.id, reason);
+            await api.reportListing(item.id, userId, reason);
             alert(
                 "Thank you! Your report has been submitted to the Admin team for review."
             );
         } catch (error) {
-            alert("Failed to submit report. Please try again.");
+            alert("Failed to submit report: " + error.message);
         }
     };
 

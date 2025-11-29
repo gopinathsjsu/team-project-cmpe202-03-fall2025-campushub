@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, CheckCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/apiClient";
 
 export default function SignupPage() {
     const [formData, setFormData] = useState({
@@ -36,37 +37,41 @@ export default function SignupPage() {
             return;
         }
 
-        if (!formData.email.includes("@campus.edu")) {
-            setError("Please use your campus email address");
+        // Check for campus email (sjsu.edu or campus.edu)
+        if (!formData.email.includes("@sjsu.edu") && !formData.email.includes("@campus.edu")) {
+            setError("Please use your campus email address (@sjsu.edu)");
             setLoading(false);
             return;
         }
 
         try {
-            // Store user information in localStorage for future logins
-            const existingUsers = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-            const newUser = {
+            const name = `${formData.firstName} ${formData.lastName}`;
+            const result = await api.signUp({
+                name,
                 email: formData.email,
-                name: `${formData.firstName} ${formData.lastName}`,
-                password: formData.password // In a real app, this would be hashed
-            };
+                role: "buyer", // Default role
+                password: formData.password
+            });
             
-            // Check if user already exists
-            if (existingUsers.find(user => user.email === formData.email)) {
-                setError("User with this email already exists. Please login instead.");
-                setLoading(false);
-                return;
+            if (result && result.id) {
+                // After signup, automatically sign in
+                const signInResult = await api.signIn(formData.email, formData.password);
+                if (signInResult && signInResult.user) {
+                    const { user, token } = signInResult;
+                    api.setToken(token);
+                    login(user.role || "buyer", user.email, user.name || "", user.id || "");
+                    navigate("/browse");
+                } else {
+                    // If auto sign-in fails, redirect to login
+                    setError("Account created successfully! Please sign in.");
+                    setTimeout(() => navigate("/login"), 2000);
+                }
+            } else {
+                setError("Account created but failed to authenticate. Please sign in.");
+                setTimeout(() => navigate("/login"), 2000);
             }
-            
-            // Add new user to the list
-            existingUsers.push(newUser);
-            localStorage.setItem("registeredUsers", JSON.stringify(existingUsers));
-            
-            // Authenticate the new user
-            login("user", formData.email, newUser.name);
-            navigate("/browse");
         } catch (err) {
-            setError("Failed to create account. Please try again.");
+            setError(err.message || "Failed to create account. Please try again.");
         } finally {
             setLoading(false);
         }

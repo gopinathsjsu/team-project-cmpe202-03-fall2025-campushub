@@ -12,6 +12,7 @@ export function AuthProvider({ children }) {
     const [userRole, setUserRole] = useState("user"); // user | admin
     const [userEmail, setUserEmail] = useState("");
     const [userName, setUserName] = useState("");
+    const [userId, setUserId] = useState("");
 
     // Check for existing authentication on mount
     useEffect(() => {
@@ -19,25 +20,29 @@ export function AuthProvider({ children }) {
         const role = localStorage.getItem("userRole");
         const email = localStorage.getItem("userEmail");
         const name = localStorage.getItem("userName");
+        const id = localStorage.getItem("userId");
 
         if (authStatus === "true") {
             setIsAuthenticated(true);
             setUserRole(role || "user");
             setUserEmail(email || "");
             setUserName(name || "");
+            setUserId(id || "");
         }
     }, []);
 
-    const login = (role, email, name = "") => {
-        console.log("Logging in user:", { role, email, name });
+    const login = (role, email, name = "", id = "") => {
+        console.log("Logging in user:", { role, email, name, id });
         setIsAuthenticated(true);
         setUserRole(role);
         setUserEmail(email);
         setUserName(name);
+        setUserId(id);
         
         localStorage.setItem("isAuthenticated", "true");
         localStorage.setItem("userRole", role);
         localStorage.setItem("userEmail", email);
+        localStorage.setItem("userId", id);
         if (name) localStorage.setItem("userName", name);
         console.log("User logged in successfully");
     };
@@ -47,11 +52,14 @@ export function AuthProvider({ children }) {
         setUserRole("user");
         setUserEmail("");
         setUserName("");
+        setUserId("");
         
         localStorage.removeItem("isAuthenticated");
         localStorage.removeItem("userRole");
         localStorage.removeItem("userEmail");
         localStorage.removeItem("userName");
+        localStorage.removeItem("userId");
+        localStorage.removeItem("authToken");
     };
 
     const isAdmin = userRole === "admin";
@@ -60,11 +68,12 @@ export function AuthProvider({ children }) {
         isAuthenticated, 
         userRole, 
         userEmail, 
-        userName, 
+        userName,
+        userId,
         isAdmin,
         login, 
         logout 
-    }), [isAuthenticated, userRole, userEmail, userName, isAdmin]);
+    }), [isAuthenticated, userRole, userEmail, userName, userId, isAdmin]);
 
     return (
         <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
