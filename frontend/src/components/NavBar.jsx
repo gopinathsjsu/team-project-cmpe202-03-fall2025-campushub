@@ -8,7 +8,6 @@ import {
     ShoppingBag,
     MessageCircle,
     Shield,
-    Store,
     Sparkles,
     LogOut,
     Package,
@@ -25,7 +24,6 @@ export default function NavBar() {
 
     const navLinks = [
         { path: "/browse", label: "Browse", icon: ShoppingBag },
-        { path: "/sell", label: "Sell", icon: Store },
         { path: "/my-listings", label: "My Listings", icon: Package },
         { path: "/chat", label: "Chat", icon: MessageCircle },
     ];

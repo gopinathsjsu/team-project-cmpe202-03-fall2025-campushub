@@ -82,14 +82,14 @@ func NewRouter(d Deps) *gin.Engine {
 
 		v1.GET("/listings", lh.List) // Public - anyone can browse listings
 		v1.GET("/listings/:id", lh.Get) // Public - anyone can view listing details
-		v1.POST("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Create)
-		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Update)
-		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.MarkSold)
-		v1.DELETE("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Delete)
-		v1.GET("/listings/mine", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.ListMine)
+		v1.POST("/listings", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.Create)
+		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.Update)
+		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.MarkSold)
+		v1.DELETE("/listings/:id", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.Delete)
+		v1.GET("/listings/mine", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.ListMine)
 
-		v1.POST("/uploads/presign", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Presign)
-		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Complete)
+		v1.POST("/uploads/presign", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), uh.Presign)
+		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), uh.Complete)
 
 		if rh != nil {
 			v1.POST("/reports", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), rh.Create) // Allow all authenticated users to report

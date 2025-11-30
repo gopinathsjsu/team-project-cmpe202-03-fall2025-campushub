@@ -28,6 +28,12 @@ export default function ListingDetailPage() {
     try {
       const res = await api.getListing(id);
       const listing = res.data || res;
+      console.log("Listing loaded:", { 
+        id: listing.id, 
+        sellerId: listing.sellerId, 
+        status: listing.status,
+        title: listing.title 
+      });
       setItem(listing);
     } catch (error) {
       console.error("Failed to load listing:", error);
@@ -178,7 +184,7 @@ export default function ListingDetailPage() {
                 </div>
               )}
 
-              {item.sold && (
+              {(item.status === "sold" || item.sold) && (
                 <div className="absolute top-2 sm:top-3 left-2 sm:left-3 bg-red-500 text-white px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs sm:text-sm font-bold shadow-lg flex items-center space-x-1 sm:space-x-1.5">
                     <XCircle size={14} className="sm:w-4 sm:h-4" />
                     <span>SOLD</span>
@@ -268,13 +274,43 @@ export default function ListingDetailPage() {
                   </p>
                 </div>
               </div>
-              {!item.sold && (
+              {/* Chat with Seller Button - Show for any authenticated user (not the seller) when listing is active */}
+              {userId && 
+               item.sellerId && 
+               String(userId) !== String(item.sellerId) && 
+               item.status !== "sold" && 
+               !item.sold && (
                 <button
+                  onClick={() => {
+                    console.log("Navigating to chat:", { sellerId: item.sellerId, listingId: item.id, listingTitle: item.title });
+                    navigate(`/chat?sellerId=${item.sellerId}&listingId=${item.id}&listingTitle=${encodeURIComponent(item.title)}`);
+                  }}
                   className="flex items-center justify-center space-x-2 w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-semibold transition-all shadow-md hover:shadow-lg"
                 >
                   <MessageCircle size={18} />
-                  <span>Contact Seller</span>
+                  <span>Chat with Seller</span>
                 </button>
+              )}
+              
+              {/* Show message if user is not logged in */}
+              {!userId && item.status !== "sold" && !item.sold && (
+                <div className="text-center py-2 text-sm text-gray-600">
+                  <Link to="/login" className="text-blue-600 hover:underline">Log in</Link> to chat with the seller
+                </div>
+              )}
+              
+              {/* Show message if user is the seller */}
+              {userId && item.sellerId && String(userId) === String(item.sellerId) && (
+                <div className="text-center py-2 text-sm text-gray-600">
+                  This is your listing
+                </div>
+              )}
+              
+              {/* Show message if listing is sold */}
+              {(item.status === "sold" || item.sold) && (
+                <div className="text-center py-2 text-sm text-gray-600">
+                  This item has been sold
+                </div>
               )}
             </div>
 

@@ -49,6 +49,24 @@ const handleResponse = async (response) => {
     error: { message: `HTTP ${response.status}: ${response.statusText}` }
   }));
   
+  // Handle 401 Unauthorized - token expired or invalid
+  if (response.status === 401) {
+    // Clear invalid token
+    setAuthToken(null);
+    
+    // Check if we're on a page that needs auth (not login/signup)
+    if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+      // Redirect to login with a message
+      window.location.href = '/login?error=session_expired';
+    }
+    
+    const errorMsg = data.error?.message || "Your session has expired. Please log in again.";
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API] Unauthorized (401):', { error: data.error, fullData: data });
+    }
+    throw new Error(errorMsg);
+  }
+  
   // Backend returns {data: ...} or {error: ...}
   if (data.error) {
     const errorMsg = data.error.message || data.error.details || "API request failed";
@@ -59,6 +77,24 @@ const handleResponse = async (response) => {
   }
   
   if (!response.ok) {
+    // Handle 401 Unauthorized - token expired or invalid
+    if (response.status === 401) {
+      // Clear invalid token
+      setAuthToken(null);
+      
+      // Check if we're on a page that needs auth (not login/signup)
+      if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+        // Store current path to redirect back after login
+        sessionStorage.setItem('redirectAfterLogin', window.location.pathname);
+        // Redirect to login with a message
+        window.location.href = '/login?error=session_expired';
+        return; // Don't throw error, we're redirecting
+      }
+      
+      const errorMsg = data.error?.message || "Your session has expired. Please log in again.";
+      throw new Error(errorMsg);
+    }
+    
     const errorMsg = data.error?.message || `HTTP ${response.status}: ${response.statusText}`;
     if (process.env.NODE_ENV === 'development') {
       console.error('[API] Non-OK response:', { status: response.status, statusText: response.statusText, data });
