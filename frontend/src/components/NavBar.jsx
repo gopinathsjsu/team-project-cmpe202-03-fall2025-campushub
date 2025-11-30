@@ -27,9 +27,6 @@ export default function NavBar() {
         { path: "/chat", label: "Chat", icon: MessageCircle },
     ];
 
-    const adminNavLinks = [
-        { path: "/admin", label: "Moderation", icon: Shield },
-    ];
 
     return (
         <header className="sticky top-0 z-50 border-b border-primary-100 bg-white shadow-sm">
@@ -55,21 +52,18 @@ export default function NavBar() {
                     {/* Desktop Navigation */}
                     <nav className="hidden md:flex items-center space-x-1">
                         {isAdmin ? (
-                            // Admin navigation - only moderation
-                            adminNavLinks.map(({ path, label, icon: Icon }) => (
-                                <Link
-                                    key={path}
-                                    to={path}
-                                    className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                        isActive(path)
-                                            ? "bg-red-500 text-white shadow-md"
-                                            : "text-gray-700 hover:bg-red-50 hover:text-red-700"
-                                    }`}
-                                >
-                                    <Icon size={16} />
-                                    <span>{label}</span>
-                                </Link>
-                            ))
+                            // Admin navigation - only Admin link
+                            <Link
+                                to="/admin"
+                                className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                    isActive("/admin")
+                                        ? "bg-primary-500 text-white shadow-md"
+                                        : "text-gray-700 hover:bg-primary-50 hover:text-primary-700"
+                                }`}
+                            >
+                                <Shield size={16} />
+                                <span>Admin Panel</span>
+                            </Link>
                         ) : (
                             // Regular user navigation
                             navLinks.map(({ path, label, icon: Icon }) => (
@@ -91,10 +85,12 @@ export default function NavBar() {
 
                     {/* Right Side Actions */}
                     <div className="flex items-center space-x-3">
-                        {/* Chatbot Button - Desktop */}
-                        <div className="hidden sm:block">
-                            <ChatbotButton />
-                        </div>
+                        {/* Chatbot Button - Desktop (hidden for admin) */}
+                        {!isAdmin && (
+                            <div className="hidden sm:block">
+                                <ChatbotButton />
+                            </div>
+                        )}
 
                         {/* User Menu */}
                         {isAuthenticated ? (
@@ -151,22 +147,19 @@ export default function NavBar() {
                     <div className="px-4 py-3 space-y-2">
                         {/* Mobile Navigation Links */}
                         {isAdmin ? (
-                            // Admin mobile navigation
-                            adminNavLinks.map(({ path, label, icon: Icon }) => (
-                                <Link
-                                    key={path}
-                                    to={path}
-                                    onClick={() => setMobileMenuOpen(false)}
-                                    className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                        isActive(path)
-                                            ? "bg-red-500 text-white"
-                                            : "text-gray-700 hover:bg-red-50"
-                                    }`}
-                                >
-                                    <Icon size={18} />
-                                    <span>{label}</span>
-                                </Link>
-                            ))
+                            // Admin mobile navigation - only Admin link
+                            <Link
+                                to="/admin"
+                                onClick={() => setMobileMenuOpen(false)}
+                                className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                    isActive("/admin")
+                                        ? "bg-primary-500 text-white"
+                                        : "text-gray-700 hover:bg-primary-50"
+                                }`}
+                            >
+                                <Shield size={18} />
+                                <span>Admin Panel</span>
+                            </Link>
                         ) : (
                             // Regular user mobile navigation
                             navLinks.map(({ path, label, icon: Icon }) => (
@@ -186,10 +179,12 @@ export default function NavBar() {
                             ))
                         )}
 
-                        {/* Mobile Chatbot Button */}
-                        <div className="pt-2">
-                            <ChatbotButton />
-                        </div>
+                        {/* Mobile Chatbot Button (hidden for admin) */}
+                        {!isAdmin && (
+                            <div className="pt-2">
+                                <ChatbotButton />
+                            </div>
+                        )}
 
                         {/* Mobile User Menu */}
                         {isAuthenticated ? (

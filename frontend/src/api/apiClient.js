@@ -27,6 +27,14 @@ const createHeaders = (includeAuth = false, contentType = "application/json") =>
     const token = getAuthToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] Auth token found, length:', token.length, 'preview:', token.substring(0, 20) + '...');
+      }
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[API] WARNING: Auth required but no token found in localStorage');
+      }
+      console.warn("Auth token not found in localStorage");
     }
   }
   
@@ -42,21 +50,35 @@ const handleResponse = async (response) => {
   // Backend returns {data: ...} or {error: ...}
   if (data.error) {
     const errorMsg = data.error.message || data.error.details || "API request failed";
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API] Error response:', { status: response.status, error: data.error, fullData: data });
+    }
     throw new Error(errorMsg);
   }
   
   if (!response.ok) {
-    throw new Error(data.error?.message || `HTTP ${response.status}: ${response.statusText}`);
+    const errorMsg = data.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API] Non-OK response:', { status: response.status, statusText: response.statusText, data });
+    }
+    throw new Error(errorMsg);
   }
   
   // Return the data field if present, otherwise return the whole response
-  return data.data !== undefined ? data.data : data;
+  const result = data.data !== undefined ? data.data : data;
+  
+  // Debug logging (remove in production)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('API Response:', { endpoint: response.url, hasData: !!result, resultType: typeof result });
+  }
+  
+  return result;
 };
 
 const fetchAPI = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
   const fetchOptions = {
-    ...options,
+    method: options.method || "GET",
     headers: {
       ...createHeaders(options.auth, options.contentType),
       ...options.headers,
@@ -68,8 +90,34 @@ const fetchAPI = async (endpoint, options = {}) => {
     fetchOptions.body = options.body;
   }
   
+  const token = getAuthToken();
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[API] ${fetchOptions.method} ${url}`, {
+      hasAuth: !!token,
+      hasBody: !!options.body,
+      requiresAuth: options.auth,
+      headers: Object.keys(fetchOptions.headers)
+    });
+    if (options.auth && !token) {
+      console.error('[API] ERROR: Auth required but token is missing!');
+    }
+  }
+  
   const response = await fetch(url, fetchOptions);
-  return handleResponse(response);
+  const result = await handleResponse(response);
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[API] Response from ${url}:`, {
+      status: response.status,
+      hasData: !!result,
+      resultType: typeof result,
+      isArray: Array.isArray(result),
+      keys: result && typeof result === 'object' && !Array.isArray(result) ? Object.keys(result) : 'N/A',
+      itemsCount: result?.items?.length || (Array.isArray(result) ? result.length : 'N/A')
+    });
+  }
+  
+  return result;
 };
 
 
@@ -92,8 +140,22 @@ const api = {
       body: JSON.stringify({ email, password }),
     });
     // Store token if present
-    if (result.token) {
+    // Backend returns {data: {user: ..., token: ...}}, handleResponse extracts data
+    // So result should be {user: ..., token: ...}
+    if (result && result.token) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] signIn: Storing token from result.token, length:', result.token.length);
+      }
       setAuthToken(result.token);
+      // Verify it was stored
+      const stored = localStorage.getItem("authToken");
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] signIn: Token stored in localStorage:', !!stored);
+      }
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[API] signIn: No token in result. Result keys:', result ? Object.keys(result) : 'null');
+      }
     }
     return result;
   },
@@ -115,24 +177,41 @@ const api = {
   async listListings(params = {}) {
     if (USE_MOCK) return mockApi.listListings(params);
     const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
+    
+    // Map frontend param names to backend param names
+    const paramMap = {
+      q: params.q,
+      category: params.category,
+      status: params.status || "active", // Default to active
+      sort: params.sort,
+      limit: params.limit,
+      offset: params.offset,
+      // Map price parameters
+      priceMin: params.priceMin || params.minPrice,
+      priceMax: params.priceMax || params.maxPrice,
+    };
+    
+    Object.entries(paramMap).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
         queryParams.append(key, value);
       }
     });
     
     const queryString = queryParams.toString();
-    // Backend requires auth for listings
+    // Listings are now public - no auth required for browsing
+    // But send token if available for better experience
+    const token = getAuthToken();
     return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`, {
-      auth: true,
+      auth: !!token, // Only send auth if token exists
     });
   },
 
   async getListing(id) {
     if (USE_MOCK) return mockApi.getListing(id);
-    // Backend requires auth for listings
+    // Listings are now public - no auth required
+    const token = getAuthToken();
     return fetchAPI(`/listings/${id}`, {
-      auth: true,
+      auth: !!token, // Only send auth if token exists
     });
   },
 

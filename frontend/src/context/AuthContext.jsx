@@ -21,13 +21,22 @@ export function AuthProvider({ children }) {
         const email = localStorage.getItem("userEmail");
         const name = localStorage.getItem("userName");
         const id = localStorage.getItem("userId");
+        const token = localStorage.getItem("authToken");
 
-        if (authStatus === "true") {
+        if (authStatus === "true" && token) {
             setIsAuthenticated(true);
             setUserRole(role || "user");
             setUserEmail(email || "");
             setUserName(name || "");
             setUserId(id || "");
+            // Token is already in localStorage, apiClient will use it automatically
+        } else if (authStatus === "true" && !token) {
+            // User was marked as authenticated but token is missing - clear auth
+            localStorage.removeItem("isAuthenticated");
+            localStorage.removeItem("userRole");
+            localStorage.removeItem("userEmail");
+            localStorage.removeItem("userName");
+            localStorage.removeItem("userId");
         }
     }, []);
 

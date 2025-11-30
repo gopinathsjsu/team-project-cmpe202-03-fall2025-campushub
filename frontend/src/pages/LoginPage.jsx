@@ -22,11 +22,16 @@ export default function LoginPage() {
 
         try {
             const result = await api.signIn(formData.email, formData.password);
+            console.log("Sign-in result:", result);
             
             if (result && result.user) {
                 const { user, token } = result;
+                console.log("Storing token:", token ? `length: ${token.length}` : "missing");
                 // Store token
                 api.setToken(token);
+                // Verify token was stored
+                const storedToken = localStorage.getItem("authToken");
+                console.log("Token stored:", !!storedToken, storedToken ? `length: ${storedToken.length}` : "missing");
                 // Login with user info
                 login(user.role || "buyer", user.email, user.name || "", user.id || "");
                 
@@ -37,9 +42,11 @@ export default function LoginPage() {
                     navigate("/browse");
                 }
             } else {
+                console.error("Invalid sign-in response:", result);
                 setError("Invalid response from server. Please try again.");
             }
         } catch (err) {
+            console.error("Sign-in error:", err);
             setError(err.message || "Invalid credentials. Please try again.");
         } finally {
             setLoading(false);

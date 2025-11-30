@@ -285,15 +285,9 @@ export default function AdminPage() {
                         {r.status === "open" && (
                           <>
                             <button 
-                              onClick={() => handleUpdateReportStatus(r.id, "resolved")}
-                              className="flex items-center space-x-1 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                            >
-                              <CheckCircle size={16} />
-                              <span>Resolve</span>
-                            </button>
-                            
-                            <button 
-                              onClick={() => handleUpdateReportStatus(r.id, "dismissed")}
+                              onClick={async () => {
+                                await handleUpdateReportStatus(r.id, "resolved");
+                              }}
                               className="flex items-center space-x-1 px-3 py-2 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                             >
                               <XCircle size={16} />
@@ -301,7 +295,10 @@ export default function AdminPage() {
                             </button>
 
                             <button 
-                              onClick={() => handleForceRemoveListing(r.listingId)}
+                              onClick={async () => {
+                                await handleForceRemoveListing(r.listingId);
+                                await handleUpdateReportStatus(r.id, "resolved");
+                              }}
                               className="flex items-center space-x-1 px-3 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
                             >
                               <XCircle size={16} />

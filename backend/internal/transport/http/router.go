@@ -69,8 +69,8 @@ func NewRouter(d Deps) *gin.Engine {
 			v1.POST("/auth/sign-in", ah.SignIn)
 		}
 
-		v1.GET("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.List)
-		v1.GET("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Get)
+		v1.GET("/listings", lh.List) // Public - anyone can browse listings
+		v1.GET("/listings/:id", lh.Get) // Public - anyone can view listing details
 		v1.POST("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Create)
 		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Update)
 		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.MarkSold)
@@ -81,7 +81,7 @@ func NewRouter(d Deps) *gin.Engine {
 		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Complete)
 
 		if rh != nil {
-			v1.POST("/reports", middleware.JWT(d.JWTSecret, "seller", "admin"), rh.Create)
+			v1.POST("/reports", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), rh.Create) // Allow all authenticated users to report
 			v1.GET("/reports", middleware.JWT(d.JWTSecret, "admin"), rh.List)
 			v1.PATCH("/reports/:id/status", middleware.JWT(d.JWTSecret, "admin"), rh.UpdateStatus)
 		}
