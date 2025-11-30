@@ -10,7 +10,7 @@ import ListingCard from "../components/ListingCard";
 import EmptyState from "../components/EmptyState";
 
 export default function BrowsePage() {
-    
+    const { userId } = useAuth();
     const [q, setQ] = useState("");
     const [category, setCategory] = useState("All");
     const [minPrice, setMinPrice] = useState("");
@@ -21,15 +21,42 @@ export default function BrowsePage() {
     const load = async () => {
         setLoading(true);
         try {
-            const res = await api.listListings({
-                q,
-                category,
-                minPrice,
-                maxPrice,
-            });
-            setData(res.items);
+            // Build params object, only include non-empty values
+            // Backend expects: q, category, priceMin, priceMax, status, limit, offset, sort
+            const params = {
+                status: "active", // Always show active listings
+            };
+            if (q && q.trim()) params.q = q.trim();
+            if (category && category !== "All") params.category = category;
+            // API client will map minPrice/maxPrice to priceMin/priceMax
+            if (minPrice) params.minPrice = minPrice;
+            if (maxPrice) params.maxPrice = maxPrice;
+            
+            console.log("Loading listings with params:", params);
+            const res = await api.listListings(params);
+            console.log("Listings API response:", res);
+            
+            // Handle response structure: res should be {items: [...], total: ...} after handleResponse extracts data
+            if (res && res.items && Array.isArray(res.items)) {
+                console.log(`Setting ${res.items.length} listings`);
+                setData(res.items);
+            } else if (Array.isArray(res)) {
+                console.log(`Setting ${res.length} listings (direct array)`);
+                setData(res);
+            } else {
+                console.warn("Unexpected response format:", res);
+                setData([]);
+            }
         } catch (error) {
             console.error("Failed to load listings:", error);
+            console.error("Error details:", error.message, error.stack);
+            setData([]);
+            // Show user-friendly error
+            if (error.message && (error.message.includes("UNAUTHORIZED") || error.message.includes("401"))) {
+                alert("Please sign in to view listings.");
+            } else {
+                alert("Failed to load listings: " + error.message);
+            }
         } finally {
             setLoading(false);
         }
@@ -44,17 +71,25 @@ export default function BrowsePage() {
     }, [q, category, minPrice, maxPrice]);
 
     const handleReport = async (item) => {
+        if (!userId) {
+            alert("Please sign in to report a listing.");
+            return;
+        }
         const reason = prompt(
             "Please provide a reason for reporting this listing:"
         );
         if (!reason || !reason.trim()) return;
         try {
-            await api.reportListing(item.id, reason);
+            console.log("Reporting listing:", { listingId: item.id, reporterId: userId, reason });
+            const token = localStorage.getItem("authToken");
+            console.log("Auth token present:", !!token, token ? `length: ${token.length}` : "missing");
+            await api.reportListing(item.id, userId, reason);
             alert(
                 "Thank you! Your report has been submitted to the Admin team for review."
             );
         } catch (error) {
-            alert("Failed to submit report. Please try again.");
+            console.error("Report error:", error);
+            alert("Failed to submit report: " + error.message);
         }
     };
 

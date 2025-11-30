@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/apiClient";
+import { useAuth } from "../context/AuthContext";
 // No longer need role-based restrictions
 import ImagePicker from "../components/ImagePicker";
 import {
@@ -22,13 +23,22 @@ const CATEGORIES = [
     "Other",
 ];
 
+const CONDITIONS = [
+    { value: "New", label: "New" },
+    { value: "LikeNew", label: "Like New" },
+    { value: "Good", label: "Good" },
+    { value: "Fair", label: "Fair" },
+];
+
 export default function SellPage() {
     const nav = useNavigate();
+    const { userId } = useAuth();
     const [form, setForm] = useState({
         title: "",
         description: "",
         price: "",
         category: CATEGORIES[0],
+        condition: CONDITIONS[1].value,
         images: [],
     });
     const [loading, setLoading] = useState(false);
@@ -69,14 +79,27 @@ export default function SellPage() {
             return;
         }
 
+        if (!userId) {
+            alert("Please sign in to create a listing.");
+            nav("/login");
+            return;
+        }
+
         setLoading(true);
         try {
-            const payload = { ...form, price: Number(form.price) };
+            const payload = {
+                sellerId: userId,
+                title: form.title,
+                description: form.description,
+                category: form.category,
+                price: Number(form.price),
+                condition: form.condition,
+            };
             const created = await api.createListing(payload);
             alert("Listing created successfully!");
             nav(`/listing/${created.id}`);
         } catch (error) {
-            alert("Failed to create listing. Please try again.");
+            alert("Failed to create listing: " + error.message);
             setLoading(false);
         }
     };
@@ -87,6 +110,7 @@ export default function SellPage() {
             description: "",
             price: "",
             category: CATEGORIES[0],
+            condition: CONDITIONS[1].value,
             images: [],
         });
         setErrors({});
@@ -190,8 +214,8 @@ export default function SellPage() {
                         </div>
                     </div>
 
-                    {/* Category and Price Row */}
-                    <div className="grid md:grid-cols-2 gap-4">
+                    {/* Category, Condition, and Price Row */}
+                    <div className="grid md:grid-cols-3 gap-4">
                         {/* Category Field */}
                         <div>
                             <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700 mb-2">
@@ -209,6 +233,43 @@ export default function SellPage() {
                                     {CATEGORIES.map((c) => (
                                         <option key={c} value={c}>
                                             {c}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                    <svg
+                                        className="w-5 h-5 text-gray-400"
+                                        fill="currentColor"
+                                        viewBox="0 0 20 20"
+                                    >
+                                        <path
+                                            fillRule="evenodd"
+                                            d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                            clipRule="evenodd"
+                                        />
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Condition Field */}
+                        <div>
+                            <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700 mb-2">
+                                <Tag size={16} className="text-primary-600" />
+                                <span>Condition</span>
+                                <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                                <select
+                                    className="appearance-none w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all cursor-pointer bg-white"
+                                    value={form.condition}
+                                    onChange={(e) =>
+                                        updateField("condition", e.target.value)
+                                    }
+                                >
+                                    {CONDITIONS.map((c) => (
+                                        <option key={c.value} value={c.value}>
+                                            {c.label}
                                         </option>
                                     ))}
                                 </select>

@@ -14,7 +14,7 @@ func NewAdminRepo(db *pgxpool.Pool) *AdminRepoPG { return &AdminRepoPG{db} }
 
 func (r *AdminRepoPG) CountListings(ctx context.Context) (int, error) {
 	var n int
-	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM listings WHERE deleted_at IS NULL`).Scan(&n)
+	err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM listings WHERE status != 'removed'`).Scan(&n)
 	return n, err
 }
 func (r *AdminRepoPG) CountUsers(ctx context.Context) (int, error) {

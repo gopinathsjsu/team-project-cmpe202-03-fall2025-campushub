@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/apiClient";
 
 export default function LoginPage() {
     const [formData, setFormData] = useState({
@@ -20,34 +21,33 @@ export default function LoginPage() {
         setError("");
 
         try {
-            // Check if it's the admin credentials
-            if (formData.email === "devenjaimin.desai@sjsu.edu" && formData.password === "Deven@12345") {
-                login("admin", formData.email, "Admin User");
-                navigate("/admin");
+            const result = await api.signIn(formData.email, formData.password);
+            console.log("Sign-in result:", result);
+            
+            if (result && result.user) {
+                const { user, token } = result;
+                console.log("Storing token:", token ? `length: ${token.length}` : "missing");
+                // Store token
+                api.setToken(token);
+                // Verify token was stored
+                const storedToken = localStorage.getItem("authToken");
+                console.log("Token stored:", !!storedToken, storedToken ? `length: ${storedToken.length}` : "missing");
+                // Login with user info
+                login(user.role || "buyer", user.email, user.name || "", user.id || "");
+                
+                // Navigate based on role
+                if (user.role === "admin") {
+                    navigate("/admin");
+                } else {
+                    navigate("/browse");
+                }
             } else {
-                // For demo purposes, check if user exists in localStorage
-                const existingUsers = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-                const userExists = existingUsers.find(user => user.email === formData.email);
-                
-                if (!userExists) {
-                    setError("User not found! Please sign up first to create your account, then you can login.");
-                    setLoading(false);
-                    return;
-                }
-                
-                // Check password (in a real app, this would be hashed)
-                if (userExists.password !== formData.password) {
-                    setError("Invalid password. Please try again.");
-                    setLoading(false);
-                    return;
-                }
-                
-                // Authenticate existing user
-                login("user", formData.email, userExists.name);
-                navigate("/browse");
+                console.error("Invalid sign-in response:", result);
+                setError("Invalid response from server. Please try again.");
             }
         } catch (err) {
-            setError("Invalid credentials. Please try again.");
+            console.error("Sign-in error:", err);
+            setError(err.message || "Invalid credentials. Please try again.");
         } finally {
             setLoading(false);
         }
