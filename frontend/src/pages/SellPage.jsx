@@ -308,11 +308,11 @@ export default function SellPage() {
                                 onChange={(e) => updateField("condition", e.target.value)}
                                 disabled={loading}
                                 >
-                                <option value="New">New</option>
-                                <option value="Like New">Like New</option>
-                                <option value="Good">Good</option>
-                                <option value="Fair">Fair</option>
-                                <option value="Poor">Poor</option>
+                                {CONDITIONS.map((cond) => (
+                                    <option key={cond.value} value={cond.value}>
+                                        {cond.label}
+                                    </option>
+                                ))}
                                 </select>
                                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                                 <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">

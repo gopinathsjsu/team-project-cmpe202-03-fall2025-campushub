@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -16,7 +16,15 @@ export default function LoginPage() {
     const location = useLocation();
     const { login } = useAuth();
 
-    const from = location.state?.from?.pathname || "/";
+    // Check for session expired error in URL
+    useEffect(() => {
+      const urlParams = new URLSearchParams(location.search);
+      if (urlParams.get('error') === 'session_expired') {
+        setError("Your session has expired. Please log in again.");
+      }
+    }, [location.search]);
+
+    const from = location.state?.from?.pathname || sessionStorage.getItem('redirectAfterLogin') || "/";
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -38,8 +46,14 @@ export default function LoginPage() {
                 // Login with user info
                 login(user.role || "buyer", user.email, user.name || "", user.id || "");
                 
-                // Navigate based on role
-                if (user.role === "admin") {
+                // Clear redirect from sessionStorage if present
+                const redirectTo = sessionStorage.getItem('redirectAfterLogin');
+                sessionStorage.removeItem('redirectAfterLogin');
+                
+                // Navigate based on role or redirect
+                if (redirectTo && redirectTo !== '/login' && redirectTo !== '/signup') {
+                    navigate(redirectTo);
+                } else if (user.role === "admin") {
                     navigate("/admin");
                 } else {
                     navigate("/browse");

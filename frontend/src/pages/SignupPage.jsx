@@ -19,7 +19,7 @@ export default function SignupPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
-    const { register } = useAuth();
+    const { login } = useAuth();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -55,26 +55,47 @@ export default function SignupPage() {
                 password: formData.password
             });
             
-            if (result && result.id) {
-                // After signup, automatically sign in
-                const signInResult = await api.signIn(formData.email, formData.password);
-                if (signInResult && signInResult.user) {
-                    const { user, token } = signInResult;
-                    api.setToken(token);
-                    login(user.role || "buyer", user.email, user.name || "", user.id || "");
-                    navigate("/browse");
-                } else {
-                    // If auto sign-in fails, redirect to login
-                    setError("Account created successfully! Please sign in.");
+            if (result && (result.id || result.email)) {
+                // Account created successfully, now automatically sign in
+                try {
+                    const signInResult = await api.signIn(formData.email, formData.password);
+                    if (signInResult && signInResult.user && signInResult.token) {
+                        const { user, token } = signInResult;
+                        api.setToken(token);
+                        login(user.role || "buyer", user.email, user.name || name, user.id || "");
+                        setLoading(false);
+                        navigate("/browse");
+                        return;
+                    } else {
+                        // If auto sign-in fails, redirect to login
+                        setLoading(false);
+                        setError("Account created successfully! Please sign in.");
+                        setTimeout(() => navigate("/login"), 2000);
+                        return;
+                    }
+                } catch (signInErr) {
+                    // Sign-in after sign-up failed, but account was created
+                    console.error("Auto sign-in after signup failed:", signInErr);
+                    setLoading(false);
+                    setError("Account created successfully! Please sign in with your credentials.");
                     setTimeout(() => navigate("/login"), 2000);
+                    return;
                 }
             } else {
-                setError("Account created but failed to authenticate. Please sign in.");
+                setLoading(false);
+                setError("Account created but response was invalid. Please try signing in.");
                 setTimeout(() => navigate("/login"), 2000);
+                return;
             }
         } catch (err) {
-            setError(err.message || "Failed to create account. Please try again.");
-        } finally {
+            // Handle specific error cases
+            if (err.message && err.message.toLowerCase().includes("conflict")) {
+                setError("An account with this email already exists. Please sign in instead.");
+            } else if (err.message && err.message.toLowerCase().includes("exists")) {
+                setError("This email is already registered. Please sign in instead.");
+            } else {
+                setError(err.message || "Failed to create account. Please try again.");
+            }
             setLoading(false);
         }
     };

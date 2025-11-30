@@ -34,6 +34,15 @@ export default function MyListingsPage() {
   }, [listings]);
 
   const loadMyListings = async () => {
+    // Check if user is authenticated and has token
+    const token = localStorage.getItem("authToken");
+    if (!token) {
+      console.error("No auth token found, redirecting to login");
+      toast.error("Please log in to view your listings");
+      navigate("/login");
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await api.getMyListings();
@@ -44,7 +53,13 @@ export default function MyListingsPage() {
       
     } catch (error) {
       console.error("Failed to load listings:", error);
-      toast.error("Failed to load your listings");
+      // If unauthorized, redirect to login
+      if (error.message && (error.message.includes("401") || error.message.includes("unauthorized") || error.message.includes("Unauthorized"))) {
+        toast.error("Your session has expired. Please log in again.");
+        navigate("/login");
+      } else {
+        toast.error("Failed to load your listings");
+      }
     } finally {
       setLoading(false);
     }
