@@ -4,6 +4,7 @@ import mockApi from "./mockApi";
 const USE_MOCK = false; // flip false when backend is ready
 const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8082/v1";
 
+
 const getAuthToken = () => {
   return localStorage.getItem("authToken");
 };
@@ -36,6 +37,7 @@ const createHeaders = (includeAuth = false, contentType = "application/json") =>
       }
       console.warn("Auth token not found in localStorage");
     }
+    console.log(token);
   }
   
   return headers;
@@ -172,8 +174,26 @@ const api = {
     setAuthToken(null);
   },
 
+  async login(email, password) {
+    if (USE_MOCK) return mockApi.login(email, password);
+    
+    return fetchAPI("/auth/sign-in", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+  },
+
+  async register(name, email, password, role = "user") {
+    if (USE_MOCK) return mockApi.register(name, email, password, role);
+    
+    return fetchAPI("/auth/sign-up", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password, role }),
+    });
+  },
+
    // ==================== Listings ====================
-   
+
   async listListings(params = {}) {
     if (USE_MOCK) return mockApi.listListings(params);
     const queryParams = new URLSearchParams();
@@ -198,21 +218,12 @@ const api = {
     });
     
     const queryString = queryParams.toString();
-    // Listings are now public - no auth required for browsing
-    // But send token if available for better experience
-    const token = getAuthToken();
-    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`, {
-      auth: !!token, // Only send auth if token exists
-    });
+    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`,{auth:true});
   },
 
   async getListing(id) {
     if (USE_MOCK) return mockApi.getListing(id);
-    // Listings are now public - no auth required
-    const token = getAuthToken();
-    return fetchAPI(`/listings/${id}`, {
-      auth: !!token, // Only send auth if token exists
-    });
+    return fetchAPI(`/listings/${id}`,{ auth: true });
   },
 
   async createListing(payload) {
@@ -249,21 +260,128 @@ const api = {
     });
   },
 
-  async reportListing(listingId, reporterId, reason) {
-    if (USE_MOCK) return mockApi.reportListing(listingId, reporterId, reason);
-    return fetchAPI("/reports", {
+  async getMyListings() {
+    if (USE_MOCK) {
+      const userId = localStorage.getItem("userId");
+      return mockApi.listListings({}).then(res => {
+        const filtered = res.items.filter(item => item.sellerId === userId);
+        return { data: { items: filtered, total: filtered.length } };
+      });
+    }
+    
+    return fetchAPI("/listings/mine", {
+      auth: true,
+    });
+  },
+
+  async reportListing(listingId, reason, reporterId) {
+    if (USE_MOCK) return mockApi.reportListing(listingId, reason);
+    
+    return fetchAPI(`/reports`, {
       method: "POST",
       auth: true,
-      body: JSON.stringify({ listingId, reporterId, reason }),
+      body: JSON.stringify({ 
+        listingId, 
+        reporterId,
+        reason 
+      }),
     });
+  },
+
+  // ==================== Image Uploads ====================
+
+  /**
+   * Step 1: Get presigned URL for S3 upload
+  
+   */
+  async presignUpload(fileName, contentType) {    
+    return fetchAPI("/uploads/presign", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ fileName, contentType }),
+    });
+  },
+
+  /**
+   * Step 2: Upload file to S3 using presigned URL
+   */
+  async uploadToS3(presignedUrl, file, contentType) {
+    
+    const response = await fetch(presignedUrl, {
+      method: "PUT",
+      auth:true,
+      headers: {
+        "Content-Type": contentType,
+      },
+      body: file,
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to upload to S3");
+    }
+
+    return { success: true };
+  },
+
+  /**
+   * Step 3: Complete upload and attach to listing
+   */
+  async completeUpload(listingId, key, isPrimary = false) {
+   
+    return fetchAPI("/uploads/complete", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ listingId, key, isPrimary }),
+    });
+  },
+
+  async uploadImage(listingId, file, isPrimary = false) {
+    try {
+      // Step 1: Get presigned URL
+      const { data: presignData } = await this.presignUpload(file.name, file.type);
+      
+      // Step 2: Upload to S3
+      await this.uploadToS3(presignData.url, file, file.type);
+      
+      // Step 3: Complete and attach to listing
+      const result = await this.completeUpload(listingId, presignData.key, isPrimary);
+      
+      return result.data;
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      throw error;
+    }
+  },
+
+  /** List images for a listing */
+  async listImages(listingId) {
+    if (USE_MOCK) {
+      return { data: [] };
+    }
+    
+    return fetchAPI(`/listings/${listingId}/images`);
   },
 
   // ==================== AI Chatbot ====================
 
-  async chatbotSearch(query) {
+  chatbotSearch: async (query) => {
     if (USE_MOCK) return mockApi.chatbotSearch(query);
-    return fetchAPI("/agent", {
-      method: "POST",
+    
+    if (wsInstance && wsInstance.connected) {
+      try {
+        const response = await wsInstance.sendMessage('agent.search', { query });
+        return {
+          answer: response.answer,
+          results: response.results || []
+        };
+      } catch (error) {
+        console.error('WebSocket search failed:', error);
+       
+      }
+    }
+    
+    return fetchAPI('/chatbot/search', {
+      method: 'POST',
       body: JSON.stringify({ query }),
     });
   },

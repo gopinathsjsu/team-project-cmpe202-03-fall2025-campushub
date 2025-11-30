@@ -1,19 +1,11 @@
 /* eslint-disable no-unused-vars */
-import { useState } from "react";
+import { use, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/apiClient";
+import { Save, RotateCcw, DollarSign, Tag, FileText, AlertCircle, Loader2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-// No longer need role-based restrictions
 import ImagePicker from "../components/ImagePicker";
-import {
-    Save,
-    RotateCcw,
-    DollarSign,
-    Tag,
-    FileText,
-    Image as ImageIcon,
-    AlertCircle,
-} from "lucide-react";
+import toast,{ Toaster } from "react-hot-toast";
 
 const CATEGORIES = [
     "Textbooks",
@@ -31,6 +23,7 @@ const CONDITIONS = [
 ];
 
 export default function SellPage() {
+    const {userId}=useAuth();
     const nav = useNavigate();
     const { userId } = useAuth();
     const [form, setForm] = useState({
@@ -38,14 +31,14 @@ export default function SellPage() {
         description: "",
         price: "",
         category: CATEGORIES[0],
-        condition: CONDITIONS[1].value,
-        images: [],
+        condition: "Good",
     });
+    const [imageFiles, setImageFiles] = useState([]);
     const [loading, setLoading] = useState(false);
     const [errors, setErrors] = useState({});
+    const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
 
-    // All authenticated users can sell items
-
+    
     const validateForm = () => {
         const newErrors = {};
 
@@ -76,6 +69,7 @@ export default function SellPage() {
         e.preventDefault();
 
         if (!validateForm()) {
+            toast.error('Please fix the form errors before submitting');
             return;
         }
 
@@ -86,21 +80,48 @@ export default function SellPage() {
         }
 
         setLoading(true);
+        const toastId = toast.loading('Creating your listing...');
+
         try {
             const payload = {
                 sellerId: userId,
                 title: form.title,
                 description: form.description,
-                category: form.category,
                 price: Number(form.price),
+                category: form.category,
                 condition: form.condition,
             };
-            const created = await api.createListing(payload);
-            alert("Listing created successfully!");
-            nav(`/listing/${created.id}`);
+
+            const res = await api.createListing(payload);
+            const created = res.data || res;
+
+            toast.loading('Listing created! Uploading images...', { id: toastId });
+           
+            if (imageFiles.length > 0) {
+                setUploadProgress({ current: 0, total: imageFiles.length });
+                
+                for (let i = 0; i < imageFiles.length; i++) {
+                    setUploadProgress({ current: i + 1, total: imageFiles.length });
+                    toast.loading(`Uploading image ${i + 1} of ${imageFiles.length}...`, { id: toastId });
+                    
+                    try {
+                        await api.uploadImage(created.id, imageFiles[i], i === 0); 
+                    } catch (imageError) {
+                        console.error(`Failed to upload image ${i + 1}:`, imageError);
+                    }
+                }
+            }
+            
+           toast.success('🎉 Listing created successfully!', { id: toastId, duration: 3000 });
+        
+            setTimeout(() => {
+                nav(`/listing/${created.id}`);
+            }, 1000);
         } catch (error) {
-            alert("Failed to create listing: " + error.message);
+            console.error("Failed to create listing:", error);
+            toast.error(error.message || 'Failed to create listing. Please try again.', { id: toastId });
             setLoading(false);
+            setUploadProgress({ current: 0, total: 0 });
         }
     };
 
@@ -110,21 +131,45 @@ export default function SellPage() {
             description: "",
             price: "",
             category: CATEGORIES[0],
-            condition: CONDITIONS[1].value,
-            images: [],
+            condition: "Good",
         });
+        setImageFiles([]);
         setErrors({});
     };
 
     const updateField = (field, value) => {
         setForm((f) => ({ ...f, [field]: value }));
-        // Clear error when user starts typing
         if (errors[field]) {
             setErrors((e) => ({ ...e, [field]: null }));
         }
     };
 
     return (
+        <>
+        <Toaster 
+        position="top-center"
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: '#363636',
+            color: '#fff',
+          },
+          success: {
+            duration: 3000,
+            iconTheme: {
+              primary: '#10b981',
+              secondary: '#fff',
+            },
+          },
+          error: {
+            duration: 5000,
+            iconTheme: {
+              primary: '#ef4444',
+              secondary: '#fff',
+            },
+          },
+        }}
+      />
         <div className="min-h-screen bg-gray-50">
             {/* Header Section */}
             <div className="bg-gradient-to-br from-primary-600 to-primary-800 text-white">
@@ -214,7 +259,7 @@ export default function SellPage() {
                         </div>
                     </div>
 
-                    {/* Category, Condition, and Price Row */}
+                    {/* Category and Price Row */}
                     <div className="grid md:grid-cols-3 gap-4">
                         {/* Category Field */}
                         <div>
@@ -252,39 +297,27 @@ export default function SellPage() {
                             </div>
                         </div>
 
-                        {/* Condition Field */}
                         <div>
                             <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700 mb-2">
-                                <Tag size={16} className="text-primary-600" />
                                 <span>Condition</span>
-                                <span className="text-red-500">*</span>
                             </label>
                             <div className="relative">
                                 <select
-                                    className="appearance-none w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all cursor-pointer bg-white"
-                                    value={form.condition}
-                                    onChange={(e) =>
-                                        updateField("condition", e.target.value)
-                                    }
+                                className="appearance-none w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all cursor-pointer bg-white"
+                                value={form.condition}
+                                onChange={(e) => updateField("condition", e.target.value)}
+                                disabled={loading}
                                 >
-                                    {CONDITIONS.map((c) => (
-                                        <option key={c.value} value={c.value}>
-                                            {c.label}
-                                        </option>
-                                    ))}
+                                <option value="New">New</option>
+                                <option value="Like New">Like New</option>
+                                <option value="Good">Good</option>
+                                <option value="Fair">Fair</option>
+                                <option value="Poor">Poor</option>
                                 </select>
                                 <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                                    <svg
-                                        className="w-5 h-5 text-gray-400"
-                                        fill="currentColor"
-                                        viewBox="0 0 20 20"
-                                    >
-                                        <path
-                                            fillRule="evenodd"
-                                            d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                                            clipRule="evenodd"
-                                        />
-                                    </svg>
+                                <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                </svg>
                                 </div>
                             </div>
                         </div>
@@ -330,19 +363,25 @@ export default function SellPage() {
                     </div>
 
                     {/* Image Picker */}
-                    <div>
-                        <label className="flex items-center space-x-2 text-sm font-semibold text-gray-700 mb-2">
-                            <ImageIcon size={16} className="text-primary-600" />
-                            <span>Photos</span>
-                            <span className="text-xs font-normal text-gray-500">
-                                (Optional)
+                    <ImagePicker files={imageFiles} onChange={setImageFiles} disabled={loading} />
+
+                    {/* Upload Progress */}
+                    {loading && uploadProgress.total > 0 && (
+                        <div className="bg-primary-50 border border-primary-200 rounded-xl p-4">
+                        <div className="flex items-center space-x-3 mb-2">
+                            <Loader2 size={20} className="text-primary-600 animate-spin" />
+                            <span className="text-sm font-medium text-primary-900">
+                            Uploading images... ({uploadProgress.current}/{uploadProgress.total})
                             </span>
-                        </label>
-                        <ImagePicker
-                            images={form.images}
-                            onChange={(imgs) => updateField("images", imgs)}
-                        />
-                    </div>
+                        </div>
+                        <div className="w-full bg-primary-200 rounded-full h-2">
+                            <div
+                            className="bg-primary-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                            />
+                        </div>
+                        </div>
+                    )}
 
                     {/* Action Buttons */}
                     <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t">
@@ -416,5 +455,6 @@ export default function SellPage() {
                 </form>
             </div>
         </div>
+    </>
     );
 }

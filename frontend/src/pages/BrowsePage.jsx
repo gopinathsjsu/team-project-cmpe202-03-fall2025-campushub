@@ -1,15 +1,20 @@
 /* eslint-disable no-unused-vars */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Loader2, TrendingUp } from "lucide-react";
+import { Plus, Loader2, Package, ChevronLeft, ChevronRight } from "lucide-react";
 import api from "../api/apiClient";
-import { useAuth } from "../context/AuthContext";
 import SearchBar from "../components/SearchBar";
 import Filters from "../components/Filters";
 import ListingCard from "../components/ListingCard";
 import EmptyState from "../components/EmptyState";
+import { useAuth } from "../context/AuthContext";
+import ReportModal from "../components/ReportModal";
+import toast, { Toaster } from "react-hot-toast";
+
+const ITEMS_PER_PAGE = 12;
 
 export default function BrowsePage() {
+    
     const { userId } = useAuth();
     const [q, setQ] = useState("");
     const [category, setCategory] = useState("All");
@@ -17,118 +22,105 @@ export default function BrowsePage() {
     const [maxPrice, setMaxPrice] = useState("");
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalItems, setTotalItems] = useState(0);
+    const [reportModalOpen, setReportModalOpen] = useState(false);
+    const [reportingItem, setReportingItem] = useState(null);
 
-    const load = async () => {
+    const load = async (page=1) => {
         setLoading(true);
         try {
-            // Build params object, only include non-empty values
-            // Backend expects: q, category, priceMin, priceMax, status, limit, offset, sort
-            const params = {
-                status: "active", // Always show active listings
-            };
-            if (q && q.trim()) params.q = q.trim();
-            if (category && category !== "All") params.category = category;
-            // API client will map minPrice/maxPrice to priceMin/priceMax
-            if (minPrice) params.minPrice = minPrice;
-            if (maxPrice) params.maxPrice = maxPrice;
+            const offset = (page - 1) * ITEMS_PER_PAGE;
+            const res = await api.listListings({
+                q,
+                category: category !== "All" ? category : undefined,
+                priceMin: minPrice || undefined,
+                priceMax: maxPrice || undefined,
+                limit: ITEMS_PER_PAGE,
+                offset: offset,
+                sort: "created_desc",
+            });
+            const responseData = res.data || res;
+            const items = responseData.items || [];
+            const total = responseData.total || items.length;
             
-            console.log("Loading listings with params:", params);
-            const res = await api.listListings(params);
-            console.log("Listings API response:", res);
-            
-            // Handle response structure: res should be {items: [...], total: ...} after handleResponse extracts data
-            if (res && res.items && Array.isArray(res.items)) {
-                console.log(`Setting ${res.items.length} listings`);
-                setData(res.items);
-            } else if (Array.isArray(res)) {
-                console.log(`Setting ${res.length} listings (direct array)`);
-                setData(res);
-            } else {
-                console.warn("Unexpected response format:", res);
-                setData([]);
-            }
+            setData(Array.isArray(items) ? items : []);
+            setTotalItems(total);
         } catch (error) {
             console.error("Failed to load listings:", error);
-            console.error("Error details:", error.message, error.stack);
+            setError(error.message || "Failed to load listings");
             setData([]);
-            // Show user-friendly error
-            if (error.message && (error.message.includes("UNAUTHORIZED") || error.message.includes("401"))) {
-                alert("Please sign in to view listings.");
-            } else {
-                alert("Failed to load listings: " + error.message);
-            }
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        load();
-    }, []);
-    useEffect(() => {
-        const id = setTimeout(load, 300);
-        return () => clearTimeout(id);
+        setCurrentPage(1);
+        const debounceTimer = setTimeout(() => {
+            load(1);
+        }, 300); 
+        return () => clearTimeout(debounceTimer);
     }, [q, category, minPrice, maxPrice]);
 
-    const handleReport = async (item) => {
-        if (!userId) {
-            alert("Please sign in to report a listing.");
-            return;
-        }
-        const reason = prompt(
-            "Please provide a reason for reporting this listing:"
-        );
-        if (!reason || !reason.trim()) return;
-        try {
-            console.log("Reporting listing:", { listingId: item.id, reporterId: userId, reason });
-            const token = localStorage.getItem("authToken");
-            console.log("Auth token present:", !!token, token ? `length: ${token.length}` : "missing");
-            await api.reportListing(item.id, userId, reason);
-            alert(
-                "Thank you! Your report has been submitted to the Admin team for review."
-            );
-        } catch (error) {
-            console.error("Report error:", error);
-            alert("Failed to submit report: " + error.message);
-        }
+    const handlePageChange = (page) => {
+        setCurrentPage(page);
+        load(page);
+        window.scrollTo({ top: 0, behavior: "smooth" });
     };
 
-    const handleToggleSold = async (item) => {
+     const handleReport = (item) => {
+        setReportingItem(item);
+        setReportModalOpen(true);
+    };
+
+   const handleSubmitReport = async (reason) => {
+     const toastId = toast.loading("Submitting report...");
         try {
-            const updated = await api.updateListing(item.id, {
-                sold: !item.sold,
+            await api.reportListing(reportingItem.id, reason, userId);
+            setReportModalOpen(false);
+            setReportingItem(null);
+            toast.success("Thank you! Your report has been submitted to the Admin team for review.", { 
+                id: toastId,
+                duration: 4000 
             });
-            setData((d) => d.map((x) => (x.id === item.id ? updated : x)));
         } catch (error) {
-            alert("Failed to update listing status. Please try again.");
+            console.error("Failed to submit report:", error);
+            toast.error("Failed to submit report. Please try again.", { 
+                id: toastId 
+            });
         }
     };
 
     const hasFilters = q || category !== "All" || minPrice || maxPrice;
+    const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
 
     return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+             <Toaster position="top-center" />
             {/* Hero Section */}
-            <div className="bg-gradient-to-br from-primary-600 via-primary-700 to-primary-800 text-white">
-                <div className="mx-auto max-w-7xl px-4 py-12">
-                    <div className="max-w-3xl">
-                        <div className="flex items-center space-x-2 mb-3">
-                            <TrendingUp size={24} className="text-accent-400" />
-                            <span className="text-accent-300 font-medium text-sm">
-                                Campus Marketplace
-                            </span>
+            <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white shadow-xl">
+                <div className="mx-auto max-w-7xl px-4 py-8">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div>
+                            <div className="flex items-center space-x-2 mb-2">
+                                <Package size={20} className="text-accent-300" />
+                                <span className="text-accent-200 font-medium text-sm">
+                                    Campus Marketplace
+                                </span>
+                            </div>
+                            <h1 className="text-3xl md:text-4xl font-bold text-white">
+                                Browse Listings
+                            </h1>
+                            <p className="text-primary-100 mt-1 text-sm">
+                                {totalItems > 0 ? `${totalItems} items available` : "Find great deals from fellow students"}
+                            </p>
                         </div>
-                        <h1 className="text-4xl md:text-5xl font-bold mb-4 text-white">
-                            Find What You Need
-                        </h1>
-                        <p className="text-lg text-primary-100 mb-6">
-                            Browse textbooks, electronics, furniture, and more
-                            from fellow campus students
-                        </p>
 
                         <Link
                             to="/sell"
-                            className="inline-flex items-center space-x-2 bg-accent-500 hover:bg-accent-600 text-white px-6 py-3 rounded-lg font-medium transition-colors shadow-lg hover:shadow-xl"
+                            className="inline-flex items-center space-x-2 bg-accent-500 hover:bg-accent-600 text-white px-6 py-3 rounded-lg font-semibold transition-all shadow-lg hover:shadow-xl hover:scale-105 duration-200"
                         >
                             <Plus size={20} />
                             <span>Post a Listing</span>
@@ -138,10 +130,10 @@ export default function BrowsePage() {
             </div>
 
             {/* Main Content */}
-            <div className="mx-auto max-w-7xl px-4 py-8">
+            <div className="mx-auto max-w-7xl px-4 py-6">
                 <div className="space-y-6">
                     {/* Search and Filters */}
-                    <div className="space-y-4">
+                    <div className="space-y-3">
                         <SearchBar value={q} onChange={setQ} />
                         <Filters
                             category={category}
@@ -158,28 +150,49 @@ export default function BrowsePage() {
                         />
                     </div>
 
-                    {/* Results Header */}
-                    {!loading && data.length > 0 && (
-                        <div className="flex items-center justify-between">
-                            <div className="text-sm text-gray-600">
-                                <span className="font-semibold text-gray-900">
-                                    {data.length}
-                                </span>{" "}
-                                {data.length === 1 ? "listing" : "listings"}{" "}
-                                found
-                                {hasFilters && " matching your search"}
+                    {error && (
+                        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-6 text-center">
+                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
                             </div>
+                            <p className="text-red-600 font-semibold mb-1">Failed to load listings</p>
+                            <p className="text-red-500 text-sm mb-4">{error}</p>
+                            <button
+                                onClick={() => load(currentPage)}
+                                className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+                            >
+                                Try Again
+                            </button>
+                        </div>
+                    )}
+
+
+                    {/* Results Header */}
+                    {!loading && !error && data.length > 0 && (
+                        <div className="flex items-center justify-between bg-white rounded-lg px-4 py-3 shadow-sm border border-gray-200">
+                            <div className="text-sm text-gray-600">
+                                Showing <span className="font-semibold text-gray-900">{((currentPage - 1) * ITEMS_PER_PAGE) + 1}</span> - <span className="font-semibold text-gray-900">{Math.min(currentPage * ITEMS_PER_PAGE, totalItems)}</span> of <span className="font-semibold text-gray-900">{totalItems}</span> {totalItems === 1 ? "listing" : "listings"}
+                                {hasFilters && <span className="text-primary-600"> (filtered)</span>}
+                            </div>
+                            {totalPages > 1 && (
+                                <div className="text-sm text-gray-500">
+                                    Page {currentPage} of {totalPages}
+                                </div>
+                            )}
                         </div>
                     )}
 
                     {/* Loading State */}
                     {loading ? (
-                        <div className="flex flex-col items-center justify-center py-20">
+                        <div className="flex flex-col items-center justify-center py-24">
                             <Loader2
                                 size={48}
                                 className="text-primary-500 animate-spin mb-4"
                             />
                             <p className="text-gray-600">Loading listings...</p>
+                            <p className="text-gray-400 text-sm mt-1">Please wait</p>
                         </div>
                     ) : data.length === 0 ? (
                         /* Empty State */
@@ -204,21 +217,93 @@ export default function BrowsePage() {
                                 </Link>
                             }
                         />
-                    ) : (
-                        /* Listings Grid */
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {data.map((item) => (
-                                <ListingCard
-                                    key={item.id}
-                                    item={item}
-                                    onReport={handleReport}
-                                    onToggleSold={handleToggleSold}
-                                />
-                            ))}
-                        </div>
-                    )}
+                    ): !error && data.length > 0 ? (
+                        <>
+                            {/* Listings Grid */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                                {data.map((item) => (
+                                    <ListingCard
+                                        key={item.id}
+                                        item={item}
+                                        onReport={handleReport}
+                                        
+                                    />
+                                ))}
+                            </div>
+
+                            {/* Pagination */}
+                            {totalPages > 1 && (
+                                <div className="flex items-center justify-center gap-2 mt-8 pb-8">
+                                
+                                    <button
+                                        onClick={() => handlePageChange(currentPage - 1)}
+                                        disabled={currentPage === 1}
+                                        className="flex items-center space-x-1 px-4 py-2 rounded-lg border-2 border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                    >
+                                        <ChevronLeft size={18} />
+                                        <span className="hidden sm:inline">Previous</span>
+                                    </button>
+
+                                    {/* Page Numbers */}
+                                    <div className="flex items-center gap-1">
+                                        {[...Array(totalPages)].map((_, index) => {
+                                            const page = index + 1;
+                                            
+                                            if (
+                                                page === 1 ||
+                                                page === totalPages ||
+                                                (page >= currentPage - 1 && page <= currentPage + 1)
+                                            ) {
+                                                return (
+                                                    <button
+                                                        key={page}
+                                                        onClick={() => handlePageChange(page)}
+                                                        className={`w-10 h-10 rounded-lg font-medium transition-all ${
+                                                            currentPage === page
+                                                                ? "bg-primary-500 text-white shadow-md"
+                                                                : "bg-white border-2 border-gray-300 hover:border-primary-300 hover:bg-primary-50"
+                                                        }`}
+                                                    >
+                                                        {page}
+                                                    </button>
+                                                );
+                                            } else if (
+                                                page === currentPage - 2 ||
+                                                page === currentPage + 2
+                                            ) {
+                                                return (
+                                                    <span key={page} className="text-gray-400 px-1">
+                                                        ...
+                                                    </span>
+                                                );
+                                            }
+                                            return null;
+                                        })}
+                                    </div>
+
+                                    <button
+                                        onClick={() => handlePageChange(currentPage + 1)}
+                                        disabled={currentPage === totalPages}
+                                        className="flex items-center space-x-1 px-4 py-2 rounded-lg border-2 border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                    >
+                                        <span className="hidden sm:inline">Next</span>
+                                        <ChevronRight size={18} />
+                                    </button>
+                                </div>
+                            )}
+                        </>
+                    ) : null}
                 </div>
             </div>
+            <ReportModal
+                isOpen={reportModalOpen}
+                onClose={() => {
+                    setReportModalOpen(false);
+                    setReportingItem(null);
+                }}
+                onSubmit={handleSubmitReport}
+                listingTitle={reportingItem?.title}
+            />
         </div>
     );
 }

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { WebSocketProvider } from './context/WebSocketContext';
 
 import NavBar from "./components/NavBar";
 
@@ -11,6 +12,8 @@ import SellPage from "./pages/SellPage";
 import ListingDetailPage from "./pages/ListingDetailPage";
 import ChatPage from "./pages/ChatPage";
 import AdminPage from "./pages/AdminPage";
+import MyListingsPage from "./pages/MyListingsPage";
+import EditListingPage from "./pages/EditListingPage";
 
 // Protected Route Component
 function ProtectedRoute({ children, requireAdmin = false }) {
@@ -72,6 +75,12 @@ function AppContent() {
             <ListingDetailPage />
           </ProtectedRoute>
         } />
+        <Route path="/my-listings" element={
+          <ProtectedRoute>
+            <MyListingsPage />
+          </ProtectedRoute>
+        } 
+      />
         <Route path="/chat" element={
           <ProtectedRoute>
             <ChatPage />
@@ -82,6 +91,7 @@ function AppContent() {
             <AdminPage />
           </ProtectedRoute>
         } />
+        <Route path="/listing/:id/edit" element={<EditListingPage />} />
       </Routes>
     </div>
   );
@@ -90,9 +100,11 @@ function AppContent() {
 export default function App() {
   return (
     <BrowserRouter>
+    <WebSocketProvider>
       <AuthProvider>
         <AppContent />
       </AuthProvider>
+      </WebSocketProvider>
     </BrowserRouter>
   );
 }

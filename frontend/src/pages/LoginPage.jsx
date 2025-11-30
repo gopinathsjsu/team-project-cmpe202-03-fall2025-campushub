@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import api from "../api/apiClient";
@@ -13,7 +13,10 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
+    const location = useLocation();
     const { login } = useAuth();
+
+    const from = location.state?.from?.pathname || "/";
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -58,6 +61,7 @@ export default function LoginPage() {
             ...formData,
             [e.target.name]: e.target.value
         });
+        if (error) setError("");
     };
 
     return (

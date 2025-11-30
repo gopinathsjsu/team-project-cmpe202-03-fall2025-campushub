@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, CheckCircle } from "lucide-react";
@@ -10,14 +11,15 @@ export default function SignupPage() {
         lastName: "",
         email: "",
         password: "",
-        confirmPassword: ""
+        confirmPassword: "",
+        role: "buyer"
     });
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
-    const { login } = useAuth();
+    const { register } = useAuth();
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -31,8 +33,8 @@ export default function SignupPage() {
             return;
         }
 
-        if (formData.password.length < 6) {
-            setError("Password must be at least 6 characters long");
+        if (formData.password.length < 8) {
+            setError("Password must be at least 8 characters long");
             setLoading(false);
             return;
         }
@@ -82,11 +84,16 @@ export default function SignupPage() {
             ...formData,
             [e.target.name]: e.target.value
         });
+        if (error) setError("");
     };
 
     const passwordRequirements = [
-        { text: "At least 6 characters", met: formData.password.length >= 6 },
-        { text: "Passwords match", met: formData.password === formData.confirmPassword && formData.confirmPassword.length > 0 }
+        { text: "At least 8 characters", met: formData.password.length >= 8 },
+        { text: "Passwords match", met: formData.password === formData.confirmPassword && formData.confirmPassword.length > 0 },
+         {
+            text: "Campus email (@sjsu.edu)",
+            met: formData.email.endsWith("@sjsu.edu") || formData.email.endsWith("@campus.edu")
+        }
     ];
 
     return (

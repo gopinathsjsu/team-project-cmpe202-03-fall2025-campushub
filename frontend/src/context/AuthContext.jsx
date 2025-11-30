@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 // src/context/AuthContext.jsx
 import { createContext, useContext, useState, useMemo, useEffect } from "react";
+import api from "../api/apiClient";
 
 const AuthContext = createContext(null);
 export function useAuth() {
@@ -57,6 +58,7 @@ export function AuthProvider({ children }) {
     };
 
     const logout = () => {
+        api.logout();
         setIsAuthenticated(false);
         setUserRole("user");
         setUserEmail("");
@@ -71,10 +73,16 @@ export function AuthProvider({ children }) {
         localStorage.removeItem("authToken");
     };
 
+    const userRole = user?.role || "user";
+    const userEmail = user?.email || "";
+    const userName = user?.name || "";
+    const userId = user?.id || "";
     const isAdmin = userRole === "admin";
 
     const value = useMemo(() => ({ 
         isAuthenticated, 
+        user,
+        loading,
         userRole, 
         userEmail, 
         userName,
