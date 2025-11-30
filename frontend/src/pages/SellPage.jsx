@@ -23,7 +23,7 @@ const CONDITIONS = [
 ];
 
 export default function SellPage() {
-    const {userId}=useAuth();
+    
     const nav = useNavigate();
     const { userId } = useAuth();
     const [form, setForm] = useState({

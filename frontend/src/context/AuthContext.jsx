@@ -73,16 +73,16 @@ export function AuthProvider({ children }) {
         localStorage.removeItem("authToken");
     };
 
-    const userRole = user?.role || "user";
-    const userEmail = user?.email || "";
-    const userName = user?.name || "";
-    const userId = user?.id || "";
+    // const userRole = user?.role || "user";
+    // const userEmail = user?.email || "";
+    // const userName = user?.name || "";
+    // const userId = user?.id || "";
     const isAdmin = userRole === "admin";
 
     const value = useMemo(() => ({ 
         isAuthenticated, 
-        user,
-        loading,
+        // user,
+        // loading,
         userRole, 
         userEmail, 
         userName,
