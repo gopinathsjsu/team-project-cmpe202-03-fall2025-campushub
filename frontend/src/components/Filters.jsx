@@ -9,12 +9,9 @@ const CATEGORIES = [
 ];
 
 const SORT_OPTIONS = [
-    { value: "newest", label: "Newest First" },
-    { value: "oldest", label: "Oldest First" },
-    { value: "price-low", label: "Price: Low to High" },
-    { value: "price-high", label: "Price: High to Low" },
-    { value: "title-asc", label: "Title: A to Z" },
-    { value: "title-desc", label: "Title: Z to A" },
+    { value: "created_desc", label: "Newest First" },
+    { value: "price_asc", label: "Price: Low to High" },
+    { value: "price_desc", label: "Price: High to Low" },
 ];
 
 
@@ -29,7 +26,7 @@ export default function Filters({
     setSortBy,
     onClear,
 }) {
-    const hasActiveFilters = category !== "All" || minPrice || maxPrice || sortBy !== "newest";;
+    const hasActiveFilters = category !== "All" || minPrice || maxPrice || sortBy !== "created_desc";;
 
      return (
         <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">

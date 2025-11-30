@@ -174,23 +174,7 @@ const api = {
     setAuthToken(null);
   },
 
-  async login(email, password) {
-    if (USE_MOCK) return mockApi.login(email, password);
-    
-    return fetchAPI("/auth/sign-in", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-    });
-  },
 
-  async register(name, email, password, role = "user") {
-    if (USE_MOCK) return mockApi.register(name, email, password, role);
-    
-    return fetchAPI("/auth/sign-up", {
-      method: "POST",
-      body: JSON.stringify({ name, email, password, role }),
-    });
-  },
 
    // ==================== Listings ====================
 
@@ -202,11 +186,10 @@ const api = {
     const paramMap = {
       q: params.q,
       category: params.category,
-      status: params.status || "active", // Default to active
+      status: params.status || "active", 
       sort: params.sort,
       limit: params.limit,
       offset: params.offset,
-      // Map price parameters
       priceMin: params.priceMin || params.minPrice,
       priceMax: params.priceMax || params.maxPrice,
     };

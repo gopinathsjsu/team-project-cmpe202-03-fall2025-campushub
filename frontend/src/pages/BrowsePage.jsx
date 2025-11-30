@@ -21,6 +21,7 @@ export default function BrowsePage() {
     const [minPrice, setMinPrice] = useState("");
     const [maxPrice, setMaxPrice] = useState("");
     const [data, setData] = useState([]);
+    const [sortBy, setSortBy] = useState("created_desc"); 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -39,7 +40,7 @@ export default function BrowsePage() {
                 priceMax: maxPrice || undefined,
                 limit: ITEMS_PER_PAGE,
                 offset: offset,
-                sort: "created_desc",
+                sort: sortBy,
             });
             const responseData = res.data || res;
             const items = responseData.items || [];
@@ -62,7 +63,7 @@ export default function BrowsePage() {
             load(1);
         }, 300); 
         return () => clearTimeout(debounceTimer);
-    }, [q, category, minPrice, maxPrice]);
+    }, [q, category, minPrice, maxPrice, sortBy]);
 
     const handlePageChange = (page) => {
         setCurrentPage(page);
@@ -142,10 +143,13 @@ export default function BrowsePage() {
                             setMinPrice={setMinPrice}
                             maxPrice={maxPrice}
                             setMaxPrice={setMaxPrice}
+                            sortBy={sortBy}
+                            setSortBy={setSortBy}
                             onClear={() => {
                                 setCategory("All");
                                 setMinPrice("");
                                 setMaxPrice("");
+                                setSortBy("created_desc");
                             }}
                         />
                     </div>
