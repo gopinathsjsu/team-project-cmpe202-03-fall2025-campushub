@@ -83,13 +83,33 @@ export default function ChatPage() {
           const errorMessage = payload.message || payload.code || "An error occurred";
           const errorCode = payload.code || "";
           
-          console.error("WebSocket error:", { payload, event });
+          console.error("WebSocket error:", { 
+            payload, 
+            event, 
+            errorCode, 
+            errorMessage,
+            requestId: event.requestId 
+          });
           
           // If it's a "RECIPIENT_OFFLINE" error, provide helpful message
-          if (errorCode === "RECIPIENT_OFFLINE" || errorMessage.includes("not connected") || errorMessage.includes("user not connected")) {
+          if (errorCode === "RECIPIENT_OFFLINE" || 
+              errorMessage.includes("not connected") || 
+              errorMessage.includes("user not connected") ||
+              errorMessage.includes("recipient not connected")) {
             toast.error("⚠️ The recipient is not currently connected to chat. They need to open the chat page to receive messages.", {
               duration: 7000,
             });
+            // Remove optimistic message on recipient offline error
+            const currentUserIdStr = String(userId);
+            setThreads(prev => prev.map(thread => {
+              if (thread.id === activeThreadId) {
+                return {
+                  ...thread,
+                  messages: thread.messages.filter(msg => !msg.isOptimistic || String(msg.fromUserId || '') !== currentUserIdStr)
+                };
+              }
+              return thread;
+            }));
           } else {
             // Show generic error
             toast.error(`Chat error: ${errorMessage}`, { duration: 5000 });
@@ -113,19 +133,25 @@ export default function ChatPage() {
           // Use setState callback to access current threads
           setThreads(currentThreads => {
             // First, try to find thread by matching both participants
+            // Ensure string comparison for user IDs
+            const fromUserIdStr = String(fromUserId);
+            const currentUserIdStr = String(userId);
+            
             currentThreads.forEach(thread => {
-              const threadParticipants = [thread.sellerId, thread.buyerId].filter(Boolean);
-              if (threadParticipants.includes(fromUserId) && threadParticipants.includes(userId)) {
+              const sellerIdStr = String(thread.sellerId || '');
+              const buyerIdStr = String(thread.buyerId || '');
+              const threadParticipants = [sellerIdStr, buyerIdStr].filter(Boolean);
+              if (threadParticipants.includes(fromUserIdStr) && threadParticipants.includes(currentUserIdStr)) {
                 threadId = thread.id;
               }
             });
 
             // If no thread found and message is for current user, create/find appropriate thread
-            if (!threadId && fromUserId !== userId) {
+            if (!threadId && fromUserIdStr !== currentUserIdStr) {
               // Try to find or create a thread with this user
               // Check if there's a thread where this user is the seller or buyer
               const existingThread = currentThreads.find(t => 
-                t.sellerId === fromUserId || t.buyerId === fromUserId
+                String(t.sellerId || '') === fromUserIdStr || String(t.buyerId || '') === fromUserIdStr
               );
               
               if (existingThread) {
@@ -167,12 +193,12 @@ export default function ChatPage() {
                 if (thread.id === threadId) {
                   // Skip messages from current user - we already added them optimistically
                   // They will be replaced when confirmed
-                  if (fromUserId === userId) {
+                  if (fromUserIdStr === currentUserIdStr) {
                     // Check if there's an optimistic message with the same text to replace
                     const optimisticIndex = thread.messages.findIndex(msg => 
                       msg.isOptimistic && 
                       msg.text === text && 
-                      msg.fromUserId === userId
+                      String(msg.fromUserId || '') === currentUserIdStr
                     );
                     
                     if (optimisticIndex !== -1) {
@@ -193,7 +219,7 @@ export default function ChatPage() {
                     // If no optimistic message found, check for exact duplicate
                     const exactDuplicate = thread.messages.some(msg => 
                       msg.text === text && 
-                      msg.fromUserId === fromUserId &&
+                      String(msg.fromUserId || '') === fromUserIdStr &&
                       !msg.isOptimistic
                     );
                     
@@ -205,7 +231,7 @@ export default function ChatPage() {
                     // For messages from other users, check if message already exists
                     const messageExists = thread.messages.some(msg => 
                       msg.text === text && 
-                      msg.fromUserId === fromUserId &&
+                      String(msg.fromUserId || '') === fromUserIdStr &&
                       msg.sentAt === (sentAt || new Date().toISOString())
                     );
                     
@@ -219,7 +245,7 @@ export default function ChatPage() {
                   return {
                     ...thread,
                     messages: [...thread.messages, {
-                      from: fromUserId === userId ? "me" : "other",
+                      from: fromUserIdStr === currentUserIdStr ? "me" : "other",
                       text: text,
                       sentAt: sentAt || new Date().toISOString(),
                       fromUserId: fromUserId
@@ -273,11 +299,23 @@ export default function ChatPage() {
       return;
     }
 
-    // Determine recipient ID
+    // Determine recipient ID - ensure string comparison for user IDs
     // If current user is the seller, send to buyer. Otherwise, send to seller.
-    const recipientId = activeThread.sellerId === userId 
-      ? (activeThread.buyerId || null)
-      : activeThread.sellerId;
+    const currentUserIdStr = String(userId);
+    const sellerIdStr = String(activeThread.sellerId || '');
+    const buyerIdStr = String(activeThread.buyerId || '');
+    
+    const recipientId = sellerIdStr === currentUserIdStr 
+      ? (activeThread.buyerId ? String(activeThread.buyerId) : null)
+      : (activeThread.sellerId ? String(activeThread.sellerId) : null);
+    
+    console.log('Sending chat message:', {
+      userId: currentUserIdStr,
+      sellerId: sellerIdStr,
+      buyerId: buyerIdStr,
+      recipientId: recipientId,
+      activeThread: activeThread
+    });
     
     if (!recipientId) {
       toast.error("Cannot determine recipient. Please refresh and try again.");

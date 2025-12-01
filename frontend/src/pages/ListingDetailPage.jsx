@@ -32,7 +32,10 @@ export default function ListingDetailPage() {
         id: listing.id, 
         sellerId: listing.sellerId, 
         status: listing.status,
-        title: listing.title 
+        title: listing.title,
+        images: listing.images,
+        imagesCount: listing.images?.length || 0,
+        hasImages: !!(listing.images && listing.images.length > 0)
       });
       setItem(listing);
     } catch (error) {
