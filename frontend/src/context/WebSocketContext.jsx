@@ -17,7 +17,7 @@ export const WebSocketProvider = ({ children }) => {
     const reconnectTimeoutRef = useRef(null);
     const reconnectAttemptsRef = useRef(0);
     const subscribersRef = useRef(new Map());
-    const receivedMessageRef = useRef(false); // Track if we've received a message (confirms connection)
+    const receivedMessageRef = useRef(false);
     const maxReconnectAttempts = 5;
     const reconnectDelay = 3000;
 
