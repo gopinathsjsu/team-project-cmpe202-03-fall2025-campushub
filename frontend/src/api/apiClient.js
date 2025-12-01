@@ -1,8 +1,9 @@
 // src/api/apiClient.js
 import mockApi from "./mockApi";
 
-const USE_MOCK = true; // flip false when backend is ready
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8080/api";
+const USE_MOCK = false; // flip false when backend is ready
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8082/v1";
+
 
 const getAuthToken = () => {
   return localStorage.getItem("authToken");
@@ -27,7 +28,16 @@ const createHeaders = (includeAuth = false, contentType = "application/json") =>
     const token = getAuthToken();
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] Auth token found, length:', token.length, 'preview:', token.substring(0, 20) + '...');
+      }
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[API] WARNING: Auth required but no token found in localStorage');
+      }
+      console.warn("Auth token not found in localStorage");
     }
+    console.log(token);
   }
   
   return headers;
@@ -35,31 +45,158 @@ const createHeaders = (includeAuth = false, contentType = "application/json") =>
 
 
 const handleResponse = async (response) => {
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({
-      message: `HTTP ${response.status}: ${response.statusText}`
-    }));
-    throw new Error(error.message || "API request failed");
+  const data = await response.json().catch(() => ({
+    error: { message: `HTTP ${response.status}: ${response.statusText}` }
+  }));
+  
+  // Handle 401 Unauthorized - token expired or invalid
+  if (response.status === 401) {
+    // Clear invalid token
+    setAuthToken(null);
+    
+    // Check if we're on a page that needs auth (not login/signup)
+    if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+      // Redirect to login with a message
+      window.location.href = '/login?error=session_expired';
+    }
+    
+    const errorMsg = data.error?.message || "Your session has expired. Please log in again.";
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API] Unauthorized (401):', { error: data.error, fullData: data });
+    }
+    throw new Error(errorMsg);
   }
-  return response.json();
+  
+  // Backend returns {data: ...} or {error: ...}
+  if (data.error) {
+    const errorMsg = data.error.message || data.error.details || "API request failed";
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API] Error response:', { status: response.status, error: data.error, fullData: data });
+    }
+    throw new Error(errorMsg);
+  }
+  
+  if (!response.ok) {
+    // Handle 401 Unauthorized - token expired or invalid
+    if (response.status === 401) {
+      // Clear invalid token
+      setAuthToken(null);
+      
+      // Check if we're on a page that needs auth (not login/signup)
+      if (window.location.pathname !== '/login' && window.location.pathname !== '/signup') {
+        // Store current path to redirect back after login
+        sessionStorage.setItem('redirectAfterLogin', window.location.pathname);
+        // Redirect to login with a message
+        window.location.href = '/login?error=session_expired';
+        return; // Don't throw error, we're redirecting
+      }
+      
+      const errorMsg = data.error?.message || "Your session has expired. Please log in again.";
+      throw new Error(errorMsg);
+    }
+    
+    const errorMsg = data.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[API] Non-OK response:', { status: response.status, statusText: response.statusText, data });
+    }
+    throw new Error(errorMsg);
+  }
+  
+  // Return the data field if present, otherwise return the whole response
+  const result = data.data !== undefined ? data.data : data;
+  
+  // Debug logging (remove in production)
+  if (process.env.NODE_ENV === 'development') {
+    console.log('API Response:', { endpoint: response.url, hasData: !!result, resultType: typeof result });
+  }
+  
+  return result;
 };
 
 const fetchAPI = async (endpoint, options = {}) => {
   const url = `${API_BASE_URL}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
+  const fetchOptions = {
+    method: options.method || "GET",
     headers: {
       ...createHeaders(options.auth, options.contentType),
       ...options.headers,
     },
-  });
-  return handleResponse(response);
+  };
+  
+  // Add body if provided
+  if (options.body) {
+    fetchOptions.body = options.body;
+  }
+  
+  const token = getAuthToken();
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[API] ${fetchOptions.method} ${url}`, {
+      hasAuth: !!token,
+      hasBody: !!options.body,
+      requiresAuth: options.auth,
+      headers: Object.keys(fetchOptions.headers)
+    });
+    if (options.auth && !token) {
+      console.error('[API] ERROR: Auth required but token is missing!');
+    }
+  }
+  
+  const response = await fetch(url, fetchOptions);
+  const result = await handleResponse(response);
+  
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`[API] Response from ${url}:`, {
+      status: response.status,
+      hasData: !!result,
+      resultType: typeof result,
+      isArray: Array.isArray(result),
+      keys: result && typeof result === 'object' && !Array.isArray(result) ? Object.keys(result) : 'N/A',
+      itemsCount: result?.items?.length || (Array.isArray(result) ? result.length : 'N/A')
+    });
+  }
+  
+  return result;
 };
 
 
 const api = {
 
   // ==================== Authentication ====================
+
+  async signUp(payload) {
+    if (USE_MOCK) return mockApi.signUp(payload);
+    return fetchAPI("/auth/sign-up", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async signIn(email, password) {
+    if (USE_MOCK) return mockApi.signIn(email, password);
+    const result = await fetchAPI("/auth/sign-in", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    // Store token if present
+    // Backend returns {data: {user: ..., token: ...}}, handleResponse extracts data
+    // So result should be {user: ..., token: ...}
+    if (result && result.token) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] signIn: Storing token from result.token, length:', result.token.length);
+      }
+      setAuthToken(result.token);
+      // Verify it was stored
+      const stored = localStorage.getItem("authToken");
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[API] signIn: Token stored in localStorage:', !!stored);
+      }
+    } else {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[API] signIn: No token in result. Result keys:', result ? Object.keys(result) : 'null');
+      }
+    }
+    return result;
+  },
 
   setToken: (token) => {
     setAuthToken(token);
@@ -73,24 +210,39 @@ const api = {
     setAuthToken(null);
   },
 
+
+
    // ==================== Listings ====================
-   
+
   async listListings(params = {}) {
     if (USE_MOCK) return mockApi.listListings(params);
     const queryParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
+    
+    // Map frontend param names to backend param names
+    const paramMap = {
+      q: params.q,
+      category: params.category,
+      status: params.status || "active", 
+      sort: params.sort,
+      limit: params.limit,
+      offset: params.offset,
+      priceMin: params.priceMin || params.minPrice,
+      priceMax: params.priceMax || params.maxPrice,
+    };
+    
+    Object.entries(paramMap).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") {
         queryParams.append(key, value);
       }
     });
     
     const queryString = queryParams.toString();
-    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`);
+    return fetchAPI(`/listings${queryString ? `?${queryString}` : ""}`,{auth:true});
   },
 
   async getListing(id) {
     if (USE_MOCK) return mockApi.getListing(id);
-    return fetchAPI(`/listings/${id}`);
+    return fetchAPI(`/listings/${id}`,{ auth: true });
   },
 
   async createListing(payload) {
@@ -127,40 +279,274 @@ const api = {
     });
   },
 
-  async reportListing(id, reason) {
-    if (USE_MOCK) return mockApi.reportListing(id, reason);
-    return fetchAPI(`/listings/${id}/report`, {
+  async getMyListings() {
+    if (USE_MOCK) {
+      const userId = localStorage.getItem("userId");
+      return mockApi.listListings({}).then(res => {
+        const filtered = res.items.filter(item => item.sellerId === userId);
+        return { data: { items: filtered, total: filtered.length } };
+      });
+    }
+    
+    return fetchAPI("/listings/mine", {
+      auth: true,
+    });
+  },
+
+  async reportListing(listingId, reason, reporterId) {
+    if (USE_MOCK) return mockApi.reportListing(listingId, reason);
+    
+    return fetchAPI(`/reports`, {
       method: "POST",
       auth: true,
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ 
+        listingId, 
+        reporterId,
+        reason 
+      }),
     });
+  },
+
+  // ==================== Image Uploads ====================
+
+  /**
+   * Step 1: Get presigned URL for S3 upload
+  
+   */
+  async presignUpload(fileName, contentType) {    
+    return fetchAPI("/uploads/presign", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ fileName, contentType }),
+    });
+  },
+
+  /**
+   * Step 2: Upload file to S3 using presigned URL
+   */
+  async uploadToS3(presignedUrl, presignedHeaders, file, contentType) {
+    // Note: Do NOT add auth headers when using presigned URLs
+    // The presigned URL already contains all authentication
+    // AWS S3 requires ALL signed headers to be included exactly as they were signed
+    
+    console.log("Processing presigned headers:", {
+      hasHeaders: !!presignedHeaders,
+      headersType: typeof presignedHeaders,
+      headersIsArray: Array.isArray(presignedHeaders),
+      headersValue: presignedHeaders,
+      headersKeys: presignedHeaders ? Object.keys(presignedHeaders) : []
+    });
+    
+    // Build headers object from presigned response
+    // Go's http.Header is map[string][]string, which JSON marshals as object with arrays
+    const headers = {};
+    let hasSignedHeaders = false;
+    
+    if (presignedHeaders && typeof presignedHeaders === 'object' && !Array.isArray(presignedHeaders)) {
+      // Process each header from the presigned response
+      Object.keys(presignedHeaders).forEach(key => {
+        const value = presignedHeaders[key];
+        
+        // Headers from Go's http.Header are arrays (even if single value)
+        if (Array.isArray(value)) {
+          if (value.length > 0) {
+            // Use the first value (most common case)
+            // For headers with multiple values, join them with comma (HTTP spec)
+            headers[key] = value.length === 1 ? value[0] : value.join(', ');
+            hasSignedHeaders = true;
+          }
+        } else if (value != null && value !== '') {
+          // Handle case where it's already a string (shouldn't happen with Go, but be safe)
+          headers[key] = String(value);
+          hasSignedHeaders = true;
+        }
+      });
+    }
+    
+    // CRITICAL: For AWS S3 presigned PUT requests:
+    // 1. If SignedHeader contains headers, they MUST be included (they're part of signature)
+    // 2. If SignedHeader is empty, we may still need Content-Type
+    // 3. The Content-Type in headers (if present) MUST match what was signed
+    
+    // Only add Content-Type if:
+    // - No signed headers were provided (empty SignedHeader), OR
+    // - Signed headers exist but don't include Content-Type
+    if (!hasSignedHeaders) {
+      // No signed headers - safe to add Content-Type
+      headers['Content-Type'] = contentType;
+    } else if (!headers['Content-Type'] && !headers['content-type']) {
+      // Signed headers exist but no Content-Type - this is unusual but handle it
+      console.warn("Signed headers present but no Content-Type found. Adding Content-Type:", contentType);
+      headers['Content-Type'] = contentType;
+    }
+    // If Content-Type is already in signed headers, don't touch it - it's part of signature!
+    
+    console.log("Uploading to S3:", {
+      url: presignedUrl.substring(0, 150) + '...',
+      headerKeys: Object.keys(headers),
+      headers: headers,
+      hasContentType: !!(headers['Content-Type'] || headers['content-type']),
+      contentType: headers['Content-Type'] || headers['content-type'],
+      fileSize: file.size,
+      fileType: file.type,
+      expectedContentType: contentType
+    });
+    
+    const response = await fetch(presignedUrl, {
+      method: "PUT",
+      headers: headers,
+      body: file,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      
+      // Try to parse XML error for more details
+      let errorDetails = errorText;
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(errorText, 'text/xml');
+        const code = xmlDoc.querySelector('Code')?.textContent;
+        const message = xmlDoc.querySelector('Message')?.textContent;
+        if (code || message) {
+          errorDetails = `S3 Error: ${code || 'Unknown'} - ${message || errorText}`;
+        }
+      } catch (e) {
+        // If XML parsing fails, use raw error text
+      }
+      
+      console.error("S3 upload failed:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorDetails,
+        url: presignedUrl.substring(0, 150) + '...',
+        headersSent: headers,
+        responseHeaders: Object.fromEntries(response.headers.entries())
+      });
+      
+      throw new Error(`Failed to upload to S3: ${response.status} ${response.statusText}. ${errorDetails}`);
+    }
+
+    return { success: true };
+  },
+
+  /**
+   * Step 3: Complete upload and attach to listing
+   */
+  async completeUpload(listingId, key, isPrimary = false) {
+   
+    return fetchAPI("/uploads/complete", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ listingId, key, isPrimary }),
+    });
+  },
+
+  async uploadImage(listingId, file, isPrimary = false) {
+    try {
+      console.log("Starting image upload:", { listingId, fileName: file.name, fileType: file.type, isPrimary });
+      
+      // Step 1: Get presigned URL
+      // fetchAPI already unwraps response.data, so presignUpload returns { url, key } directly
+      const presignData = await this.presignUpload(file.name, file.type);
+      
+      // Step 2: Upload to S3
+      await this.uploadToS3(presignData.url, presignData.headers, file, file.type);
+      console.log("File uploaded to S3 successfully");
+      
+      // Step 3: Complete and attach to listing
+      const result = await this.completeUpload(listingId, presignData.key, isPrimary);
+      console.log("Image attached to listing:", result);
+      
+      return result;
+    } catch (error) {
+      console.error("Image upload failed:", error);
+      throw error;
+    }
+  },
+
+  /** List images for a listing */
+  async listImages(listingId) {
+    if (USE_MOCK) {
+      return { data: [] };
+    }
+    
+    return fetchAPI(`/listings/${listingId}/images`);
   },
 
   // ==================== AI Chatbot ====================
 
-  async chatbotSearch(query) {
+  chatbotSearch: async (query) => {
     if (USE_MOCK) return mockApi.chatbotSearch(query);
-    return fetchAPI("/agent", {
-      method: "POST",
+    
+    if (wsInstance && wsInstance.connected) {
+      try {
+        const response = await wsInstance.sendMessage('agent.search', { query });
+        return {
+          answer: response.answer,
+          results: response.results || []
+        };
+      } catch (error) {
+        console.error('WebSocket search failed:', error);
+       
+      }
+    }
+    
+    return fetchAPI('/chatbot/search', {
+      method: 'POST',
       body: JSON.stringify({ query }),
     });
   },
 
-  // ==================== Admin - Reports ====================
+  // ==================== Reports ====================
 
-  async listReports() {
-    if (USE_MOCK) return mockApi.listReports();
+  async createReport(listingId, reporterId, reason) {
+    if (USE_MOCK) return mockApi.createReport(listingId, reporterId, reason);
     return fetchAPI("/reports", {
+      method: "POST",
+      auth: true,
+      body: JSON.stringify({ listingId, reporterId, reason }),
+    });
+  },
+
+  async listReports(status = "") {
+    if (USE_MOCK) return mockApi.listReports();
+    const query = status ? `?status=${status}` : "";
+    return fetchAPI(`/reports${query}`, {
       auth: true,
     });
   },
 
-  async resolveReport(id, action) {
-    if (USE_MOCK) return mockApi.resolveReport(id, action);
-    return fetchAPI(`/reports/${id}`, {
+  async updateReportStatus(id, status) {
+    if (USE_MOCK) return mockApi.updateReportStatus(id, status);
+    return fetchAPI(`/reports/${id}/status`, {
+      method: "PATCH",
+      auth: true,
+      body: JSON.stringify({ status }),
+    });
+  },
+
+  // ==================== Admin ====================
+
+  async getMetrics() {
+    if (USE_MOCK) return mockApi.getMetrics();
+    return fetchAPI("/admin/metrics", {
+      auth: true,
+    });
+  },
+
+  async listUsers(limit = 20, offset = 0) {
+    if (USE_MOCK) return mockApi.listUsers(limit, offset);
+    return fetchAPI(`/admin/users?limit=${limit}&offset=${offset}`, {
+      auth: true,
+    });
+  },
+
+  async forceRemoveListing(listingId) {
+    if (USE_MOCK) return mockApi.forceRemoveListing(listingId);
+    return fetchAPI(`/admin/listings/${listingId}/remove`, {
       method: "POST",
       auth: true,
-      body: JSON.stringify({ action }),
     });
   },
 };

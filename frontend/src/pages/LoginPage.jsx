@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/apiClient";
 
 export default function LoginPage() {
     const [formData, setFormData] = useState({
@@ -12,7 +13,18 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const navigate = useNavigate();
+    const location = useLocation();
     const { login } = useAuth();
+
+    // Check for session expired error in URL
+    useEffect(() => {
+      const urlParams = new URLSearchParams(location.search);
+      if (urlParams.get('error') === 'session_expired') {
+        setError("Your session has expired. Please log in again.");
+      }
+    }, [location.search]);
+
+    const from = location.state?.from?.pathname || sessionStorage.getItem('redirectAfterLogin') || "/";
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -20,34 +32,39 @@ export default function LoginPage() {
         setError("");
 
         try {
-            // Check if it's the admin credentials
-            if (formData.email === "devenjaimin.desai@sjsu.edu" && formData.password === "Deven@12345") {
-                login("admin", formData.email, "Admin User");
-                navigate("/admin");
+            const result = await api.signIn(formData.email, formData.password);
+            console.log("Sign-in result:", result);
+            
+            if (result && result.user) {
+                const { user, token } = result;
+                console.log("Storing token:", token ? `length: ${token.length}` : "missing");
+                // Store token
+                api.setToken(token);
+                // Verify token was stored
+                const storedToken = localStorage.getItem("authToken");
+                console.log("Token stored:", !!storedToken, storedToken ? `length: ${storedToken.length}` : "missing");
+                // Login with user info
+                login(user.role || "buyer", user.email, user.name || "", user.id || "");
+                
+                // Clear redirect from sessionStorage if present
+                const redirectTo = sessionStorage.getItem('redirectAfterLogin');
+                sessionStorage.removeItem('redirectAfterLogin');
+                
+                // Navigate based on role or redirect
+                if (redirectTo && redirectTo !== '/login' && redirectTo !== '/signup') {
+                    navigate(redirectTo);
+                } else if (user.role === "admin") {
+                    navigate("/admin");
+                } else {
+                    navigate("/browse");
+                }
             } else {
-                // For demo purposes, check if user exists in localStorage
-                const existingUsers = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-                const userExists = existingUsers.find(user => user.email === formData.email);
-                
-                if (!userExists) {
-                    setError("User not found! Please sign up first to create your account, then you can login.");
-                    setLoading(false);
-                    return;
-                }
-                
-                // Check password (in a real app, this would be hashed)
-                if (userExists.password !== formData.password) {
-                    setError("Invalid password. Please try again.");
-                    setLoading(false);
-                    return;
-                }
-                
-                // Authenticate existing user
-                login("user", formData.email, userExists.name);
-                navigate("/browse");
+                console.error("Invalid sign-in response:", result);
+                setError("Invalid response from server. Please try again.");
             }
         } catch (err) {
-            setError("Invalid credentials. Please try again.");
+            console.error("Sign-in error:", err);
+            setError(err.message || "Invalid credentials. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -58,6 +75,7 @@ export default function LoginPage() {
             ...formData,
             [e.target.name]: e.target.value
         });
+        if (error) setError("");
     };
 
     return (

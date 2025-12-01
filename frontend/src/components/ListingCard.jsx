@@ -8,8 +8,8 @@ export default function ListingCard({ item, onToggleSold, onReport }) {
             <div className="relative aspect-video w-full bg-gradient-to-br from-gray-100 to-gray-200 overflow-hidden">
                 {item.images?.[0] ? (
                     <img
-                        src={item.images[0]}
-                        alt={item.title}
+                        src={item.images[0].url}
+                        alt={item.key}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
                 ) : (
@@ -105,14 +105,16 @@ export default function ListingCard({ item, onToggleSold, onReport }) {
                         </button>
                     )}
 
-                    <button
-                        onClick={() => onReport(item)}
+                    {/* <button
+                        onClick={(e) => {e.preventDefault();
+                                            onReport(item); 
+                    }}
                         className="flex items-center justify-center space-x-1.5 px-3 py-2.5 rounded-lg bg-white hover:bg-red-50 text-gray-700 hover:text-red-600 border-2 border-gray-200 hover:border-red-300 text-sm font-medium transition-all"
                         title="Report listing"
                     >
                         <Flag size={16} />
                         <span className="hidden sm:inline">Report</span>
-                    </button>
+                    </button> */}
                 </div>
             </div>
         </div>

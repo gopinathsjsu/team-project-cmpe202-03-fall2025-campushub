@@ -42,7 +42,7 @@ func NewRouter(d Deps) *gin.Engine {
 	r.Use(gin.Recovery(), gin.Logger())
 
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "http://localhost:5137")
+		c.Header("Access-Control-Allow-Origin", "http://localhost:5173")
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
@@ -80,19 +80,19 @@ func NewRouter(d Deps) *gin.Engine {
 			v1.POST("/auth/sign-in", ah.SignIn)
 		}
 
-		v1.GET("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.List)
-		v1.GET("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Get)
-		v1.POST("/listings", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Create)
-		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Update)
-		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.MarkSold)
-		v1.DELETE("/listings/:id", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.Delete)
-		v1.GET("/listings/mine", middleware.JWT(d.JWTSecret, "seller", "admin"), lh.ListMine)
+		v1.GET("/listings", lh.List) // Public - anyone can browse listings
+		v1.GET("/listings/:id", lh.Get) // Public - anyone can view listing details
+		v1.POST("/listings", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.Create)
+		v1.PATCH("/listings/:id", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.Update)
+		v1.POST("/listings/:id/mark-sold", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.MarkSold)
+		v1.DELETE("/listings/:id", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.Delete)
+		v1.GET("/listings/mine", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), lh.ListMine)
 
-		v1.POST("/uploads/presign", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Presign)
-		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "seller", "admin"), uh.Complete)
+		v1.POST("/uploads/presign", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), uh.Presign)
+		v1.POST("/uploads/complete", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), uh.Complete)
 
 		if rh != nil {
-			v1.POST("/reports", middleware.JWT(d.JWTSecret, "seller", "admin"), rh.Create)
+			v1.POST("/reports", middleware.JWT(d.JWTSecret, "buyer", "seller", "admin"), rh.Create) // Allow all authenticated users to report
 			v1.GET("/reports", middleware.JWT(d.JWTSecret, "admin"), rh.List)
 			v1.PATCH("/reports/:id/status", middleware.JWT(d.JWTSecret, "admin"), rh.UpdateStatus)
 		}

@@ -1,7 +1,9 @@
+/* eslint-disable no-unused-vars */
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Mail, Lock, User, ArrowLeft, CheckCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import api from "../api/apiClient";
 
 export default function SignupPage() {
     const [formData, setFormData] = useState({
@@ -9,7 +11,8 @@ export default function SignupPage() {
         lastName: "",
         email: "",
         password: "",
-        confirmPassword: ""
+        confirmPassword: "",
+        role: "buyer"
     });
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -30,44 +33,69 @@ export default function SignupPage() {
             return;
         }
 
-        if (formData.password.length < 6) {
-            setError("Password must be at least 6 characters long");
+        if (formData.password.length < 8) {
+            setError("Password must be at least 8 characters long");
             setLoading(false);
             return;
         }
 
-        if (!formData.email.includes("@campus.edu")) {
-            setError("Please use your campus email address");
+        // Check for campus email (sjsu.edu or campus.edu)
+        if (!formData.email.includes("@sjsu.edu") && !formData.email.includes("@campus.edu")) {
+            setError("Please use your campus email address (@sjsu.edu)");
             setLoading(false);
             return;
         }
 
         try {
-            // Store user information in localStorage for future logins
-            const existingUsers = JSON.parse(localStorage.getItem("registeredUsers") || "[]");
-            const newUser = {
+            const name = `${formData.firstName} ${formData.lastName}`;
+            const result = await api.signUp({
+                name,
                 email: formData.email,
-                name: `${formData.firstName} ${formData.lastName}`,
-                password: formData.password // In a real app, this would be hashed
-            };
+                role: "buyer", // Default role
+                password: formData.password
+            });
             
-            // Check if user already exists
-            if (existingUsers.find(user => user.email === formData.email)) {
-                setError("User with this email already exists. Please login instead.");
+            if (result && (result.id || result.email)) {
+                // Account created successfully, now automatically sign in
+                try {
+                    const signInResult = await api.signIn(formData.email, formData.password);
+                    if (signInResult && signInResult.user && signInResult.token) {
+                        const { user, token } = signInResult;
+                        api.setToken(token);
+                        login(user.role || "buyer", user.email, user.name || name, user.id || "");
+                        setLoading(false);
+                        navigate("/browse");
+                        return;
+                    } else {
+                        // If auto sign-in fails, redirect to login
+                        setLoading(false);
+                        setError("Account created successfully! Please sign in.");
+                        setTimeout(() => navigate("/login"), 2000);
+                        return;
+                    }
+                } catch (signInErr) {
+                    // Sign-in after sign-up failed, but account was created
+                    console.error("Auto sign-in after signup failed:", signInErr);
+                    setLoading(false);
+                    setError("Account created successfully! Please sign in with your credentials.");
+                    setTimeout(() => navigate("/login"), 2000);
+                    return;
+                }
+            } else {
                 setLoading(false);
+                setError("Account created but response was invalid. Please try signing in.");
+                setTimeout(() => navigate("/login"), 2000);
                 return;
             }
-            
-            // Add new user to the list
-            existingUsers.push(newUser);
-            localStorage.setItem("registeredUsers", JSON.stringify(existingUsers));
-            
-            // Authenticate the new user
-            login("user", formData.email, newUser.name);
-            navigate("/browse");
         } catch (err) {
-            setError("Failed to create account. Please try again.");
-        } finally {
+            // Handle specific error cases
+            if (err.message && err.message.toLowerCase().includes("conflict")) {
+                setError("An account with this email already exists. Please sign in instead.");
+            } else if (err.message && err.message.toLowerCase().includes("exists")) {
+                setError("This email is already registered. Please sign in instead.");
+            } else {
+                setError(err.message || "Failed to create account. Please try again.");
+            }
             setLoading(false);
         }
     };
@@ -77,11 +105,16 @@ export default function SignupPage() {
             ...formData,
             [e.target.name]: e.target.value
         });
+        if (error) setError("");
     };
 
     const passwordRequirements = [
-        { text: "At least 6 characters", met: formData.password.length >= 6 },
-        { text: "Passwords match", met: formData.password === formData.confirmPassword && formData.confirmPassword.length > 0 }
+        { text: "At least 8 characters", met: formData.password.length >= 8 },
+        { text: "Passwords match", met: formData.password === formData.confirmPassword && formData.confirmPassword.length > 0 },
+         {
+            text: "Campus email (@sjsu.edu)",
+            met: formData.email.endsWith("@sjsu.edu") || formData.email.endsWith("@campus.edu")
+        }
     ];
 
     return (
