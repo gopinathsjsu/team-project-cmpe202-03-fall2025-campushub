@@ -239,57 +239,9 @@ func (s *AgentService) searchListingsWithRetries(ctx context.Context, intent *Se
 // ====== Chat entrypoint (WS event: chat.message → pubsub.chat.request → here) ======
 
 func (s *AgentService) ProcessChat(ctx context.Context, text string) (string, []pubsub.ListingInfo, error) {
-	t := strings.TrimSpace(text)
-	l := strings.ToLower(t)
-
-	// Very light small-talk router
-	if isGreeting(l) {
-		return "Hey! 👋 I’m the CampusHub assistant. Tell me what you’re looking for, like “used CMPE 202 textbook under $40”.", nil, nil
-	}
-	if isThanks(l) {
-		return "You’re welcome! If you want, tell me a course or item and I’ll check what’s available.", nil, nil
-	}
-
-	// Treat as product search
-	intent := &SearchIntent{Keywords: []string{}}
-
-	// 1) Try LLM intent
-	if strings.TrimSpace(s.apiKey) != "" {
-		if aiIntent, err := s.extractSearchIntent(ctx, t); err == nil {
-			intent = aiIntent
-		}
-	}
-
-	// 2) Heuristic backup if LLM was empty or too vague
-	if len(intent.Keywords) == 0 && intent.Category == "" && intent.MinPrice == nil && intent.MaxPrice == nil {
-		intent = s.simpleIntentFromText(l)
-	} else {
-		// Even if LLM extracted some fields, try to extract prices heuristically as backup
-		if intent.MinPrice == nil && intent.MaxPrice == nil {
-			minPrice, maxPrice := extractPriceFromText(l)
-			if minPrice != nil || maxPrice != nil {
-				intent.MinPrice = minPrice
-				intent.MaxPrice = maxPrice
-			}
-		}
-	}
-
-	// 3) Robust search with retries
-	items, err := s.searchListingsWithRetries(ctx, intent)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// 4) Extra narrowing for course-like queries (CMPE 202, MATH 133A, ...)
-	items = filterListingsByStrongTokens(text, items)
-
-	// 5) Rank and filter by relevance
-	items = s.rankAndFilterByRelevance(text, intent, items)
-
-	// 6) Map to DTOs
-	results := s.toFullListingInfos(ctx, items)
-	answer := s.generateAnswer(t, intent, len(results))
-	return answer, results, nil
+	// ProcessChat now uses the same logic as ProcessQuery for consistency
+	// Both use Gemini LLM for natural conversations and product search
+	return s.ProcessQuery(ctx, text)
 }
 
 func isGreeting(l string) bool {
@@ -534,102 +486,125 @@ type SearchIntent struct {
 // ====== Agent entrypoint (WS event: agent.search → pubsub.agent.request → here) ======
 
 // ProcessQuery returns DB results enriched for frontend consumption
+// Now uses Gemini LLM for natural conversations and enhanced product search responses
 func (s *AgentService) ProcessQuery(ctx context.Context, query string) (string, []pubsub.ListingInfo, error) {
 	s.logger.Info("ProcessQuery called", zap.String("query", query))
 
 	t := strings.TrimSpace(query)
 	l := strings.ToLower(t)
 
-	// CRITICAL: Handle greetings and conversational queries FIRST, before any search
-	// These should return immediately without doing any database queries
+	// Check if this is a product search query
+	isProductSearch := s.isProductSearchQuery(l)
 	
-	// Handle greetings - must be strict to avoid false positives
-	if isGreeting(l) {
-		s.logger.Info("Detected greeting, returning greeting response", zap.String("query", query))
-		return "Hey! 👋 I'm the CampusHub assistant. I can help you find products on campus or just chat! Try asking me \"MacBook under $500\" or \"used CMPE 202 textbook\" or just say \"how are you\"!", nil, nil
-	}
+	// ALWAYS perform database search if it's a product search query
+	// This ensures users get listings even if Gemini fails
+	var listings []domain.Listing
+	var results []pubsub.ListingInfo
+	var searchErr error
 	
-	// Handle thanks
-	if isThanks(l) {
-		s.logger.Info("Detected thanks, returning thanks response", zap.String("query", query))
-		return "You're welcome! 😊 If you need anything else, just ask. I can help you find products or answer questions!", nil, nil
-	}
-	
-	// Handle conversational questions - check these BEFORE doing any search
-	if isConversational(l) {
-		s.logger.Info("Detected conversational query, returning conversational response", zap.String("query", query))
-		if strings.Contains(l, "how are you") || strings.Contains(l, "how's it going") || strings.Contains(l, "what's up") {
-			return "I'm doing great, thanks for asking! 😊 I'm here to help you find products on CampusHub. What are you looking for today?", nil, nil
-		}
-		if strings.Contains(l, "what are you") || strings.Contains(l, "who are you") {
-			return "I'm the CampusHub AI assistant! I help students find products like textbooks, electronics, furniture, and more. Just tell me what you're looking for, and I'll search our listings for you.", nil, nil
-		}
-		if strings.Contains(l, "what can you do") || strings.Contains(l, "help me") || strings.Contains(l, "can you help") {
-			return "I can help you:\n• Search for products (e.g., \"MacBook under $500\")\n• Find textbooks by course (e.g., \"CMPE 202 textbook\")\n• Chat and answer questions\n\nJust ask me anything!", nil, nil
-		}
-		// Generic conversational response
-		return "I'm here to help! I can search for products on CampusHub or chat with you. What would you like to know?", nil, nil
-	}
-	
-	// If we get here, it's likely a product search - proceed with search logic
-	s.logger.Info("Query appears to be a product search, proceeding with search", zap.String("query", query))
+	if isProductSearch {
+		s.logger.Info("Query appears to be a product search, proceeding with search", zap.String("query", query))
+		
+		// Start with an empty intent
+		intent := &SearchIntent{Keywords: []string{}}
 
-	// Start with an empty intent
-	intent := &SearchIntent{Keywords: []string{}}
-
-	// 1) Try LLM-based intent extraction (Gemini)
-	if strings.TrimSpace(s.apiKey) != "" {
-		if aiIntent, err := s.extractSearchIntent(ctx, t); err == nil {
-			intent = aiIntent
+		// 1) Try LLM-based intent extraction (Gemini)
+		if strings.TrimSpace(s.apiKey) != "" {
+			if aiIntent, err := s.extractSearchIntent(ctx, t); err == nil {
+				intent = aiIntent
+			} else {
+				s.logger.Error("Gemini intent extraction failed in ProcessQuery, using heuristic", zap.Error(err))
+			}
 		} else {
-			s.logger.Error("Gemini intent extraction failed in ProcessQuery, using heuristic", zap.Error(err))
+			s.logger.Warn("No LLM key configured in ProcessQuery, using heuristic intent extraction")
 		}
-	} else {
-		s.logger.Warn("No LLM key configured in ProcessQuery, using heuristic intent extraction")
-	}
 
-	// 2) Heuristic backup if LLM gave us nothing useful
-	if len(intent.Keywords) == 0 && intent.Category == "" && intent.MinPrice == nil && intent.MaxPrice == nil {
-		s.logger.Info("ProcessQuery: LLM intent empty, falling back to simpleIntentFromText")
-		intent = s.simpleIntentFromText(l)
-	} else {
-		// Even if LLM extracted some fields, try to extract prices heuristically as backup
-		if intent.MinPrice == nil && intent.MaxPrice == nil {
-			minPrice, maxPrice := extractPriceFromText(l)
-			if minPrice != nil || maxPrice != nil {
-				s.logger.Info("ProcessQuery: Extracted prices heuristically as LLM backup",
-					zap.Any("minPrice", minPrice),
-					zap.Any("maxPrice", maxPrice),
-				)
-				intent.MinPrice = minPrice
-				intent.MaxPrice = maxPrice
+		// 2) Heuristic backup if LLM gave us nothing useful
+		if len(intent.Keywords) == 0 && intent.Category == "" && intent.MinPrice == nil && intent.MaxPrice == nil {
+			s.logger.Info("ProcessQuery: LLM intent empty, falling back to simpleIntentFromText")
+			intent = s.simpleIntentFromText(l)
+		} else {
+			// Even if LLM extracted some fields, try to extract prices heuristically as backup
+			if intent.MinPrice == nil && intent.MaxPrice == nil {
+				minPrice, maxPrice := extractPriceFromText(l)
+				if minPrice != nil || maxPrice != nil {
+					s.logger.Info("ProcessQuery: Extracted prices heuristically as LLM backup",
+						zap.Any("minPrice", minPrice),
+						zap.Any("maxPrice", maxPrice),
+					)
+					intent.MinPrice = minPrice
+					intent.MaxPrice = maxPrice
+				}
 			}
 		}
+
+		s.logger.Info("ProcessQuery final intent",
+			zap.String("category", intent.Category),
+			zap.Strings("keywords", intent.Keywords),
+			zap.Any("minPrice", intent.MinPrice),
+			zap.Any("maxPrice", intent.MaxPrice),
+		)
+
+		// 3) Use the same robust search as chat
+		listings, searchErr = s.searchListingsWithRetries(ctx, intent)
+		if searchErr != nil {
+			s.logger.Error("Search failed", zap.Error(searchErr))
+		} else {
+			// 4) Narrow to course-specific listings if query contains "cmpe 202" etc.
+			listings = filterListingsByStrongTokens(query, listings)
+
+			// 5) Rank and filter by relevance to ensure precise matches
+			listings = s.rankAndFilterByRelevance(query, intent, listings)
+
+			// 6) Map to DTOs
+			results = s.toFullListingInfos(ctx, listings)
+		}
 	}
 
-	s.logger.Info("ProcessQuery final intent",
-		zap.String("category", intent.Category),
-		zap.Strings("keywords", intent.Keywords),
-		zap.Any("minPrice", intent.MinPrice),
-		zap.Any("maxPrice", intent.MaxPrice),
+	// Generate response using Gemini LLM (for both conversational and product search responses)
+	var answer string
+	if strings.TrimSpace(s.apiKey) != "" {
+		// Use Gemini to generate natural response
+		geminiAnswer, err := s.generateGeminiResponse(ctx, query, listings, results, isProductSearch)
+		if err != nil {
+			s.logger.Error("Gemini response generation failed, using fallback", zap.Error(err))
+			// Fallback to simple response
+			if isProductSearch {
+				// For product searches, always provide a response that mentions the results
+				if len(results) > 0 {
+					answer = fmt.Sprintf("I found %d listing(s) for '%s'. Check them out below!", len(results), query)
+				} else {
+					answer = fmt.Sprintf("I couldn't find any listings matching '%s'. Try adjusting your search or check back later!", query)
+				}
+			} else {
+				answer = s.generateFallbackConversationalResponse(l)
+			}
+		} else {
+			answer = geminiAnswer
+		}
+	} else {
+		// No Gemini API key, use fallback
+		if isProductSearch {
+			// For product searches, always provide a response that mentions the results
+			if len(results) > 0 {
+				answer = fmt.Sprintf("I found %d listing(s) for '%s'. Check them out below!", len(results), query)
+			} else {
+				answer = fmt.Sprintf("I couldn't find any listings matching '%s'. Try adjusting your search or check back later!", query)
+			}
+		} else {
+			answer = s.generateFallbackConversationalResponse(l)
+		}
+	}
+
+	// CRITICAL: Always return results for product searches, even if empty
+	// This ensures the frontend can display listings
+	s.logger.Info("ProcessQuery returning",
+		zap.Bool("isProductSearch", isProductSearch),
+		zap.Int("resultCount", len(results)),
+		zap.String("answer", answer),
 	)
 
-	// 3) Use the same robust search as chat
-	listings, err := s.searchListingsWithRetries(ctx, intent)
-	if err != nil {
-		return "", nil, err
-	}
-
-	// 4) Narrow to course-specific listings if query contains "cmpe 202" etc.
-	listings = filterListingsByStrongTokens(query, listings)
-
-	// 5) Rank and filter by relevance to ensure precise matches
-	listings = s.rankAndFilterByRelevance(query, intent, listings)
-
-	// 6) Map to DTOs and build an answer string
-	results := s.toFullListingInfos(ctx, listings)
-	answer := s.generateAnswer(query, intent, len(results))
-	return answer, results, nil
+	return answer, results, searchErr
 }
 
 // Fallback: simple extraction + DB query (no LLM key or LLM failure)
@@ -962,9 +937,252 @@ func (s *AgentService) rankAndFilterByRelevance(query string, intent *SearchInte
 	return filtered
 }
 
+// ====== Product Search Detection ======
+
+// isProductSearchQuery determines if the query is asking for product search
+func (s *AgentService) isProductSearchQuery(query string) bool {
+	query = strings.ToLower(query)
+	
+	// First, check if it's clearly conversational (do this FIRST to avoid false positives)
+	if isGreeting(query) || isThanks(query) || isConversational(query) {
+		return false
+	}
+	
+	// Check for conversational patterns that might contain "need" or "want" but aren't product searches
+	conversationalPatterns := []string{
+		"need your help", "need help", "want your help", "want help",
+		"can you help", "could you help", "would you help",
+		"what can you", "what do you", "how can you", "how do you",
+		"tell me about", "explain", "describe", "what is", "what are",
+		"who are you", "what are you", "how are you", "how's it going",
+	}
+	for _, pattern := range conversationalPatterns {
+		if strings.Contains(query, pattern) {
+			return false
+		}
+	}
+	
+	// Product search indicators (specific product names and search terms)
+	productIndicators := []string{
+		"iphone", "macbook", "laptop", "textbook", "book", "calculator",
+		"desk", "chair", "furniture", "electronics", "clothing",
+		"cmpe", "math", "course", "ipad", "tablet", "phone",
+		"monitor", "keyboard", "mouse", "headphones", "speaker",
+	}
+	
+	// Check if query contains specific product names (case-insensitive word boundary match)
+	queryWords := strings.Fields(query)
+	for _, word := range queryWords {
+		word = strings.ToLower(strings.Trim(word, ".,!?;:"))
+		for _, indicator := range productIndicators {
+			if word == indicator || strings.Contains(word, indicator) {
+				s.logger.Info("Product search detected", zap.String("product", indicator), zap.String("query", query))
+				return true
+			}
+		}
+	}
+	
+	// Also check if the full query contains product names (for phrases like "iphone 17")
+	for _, indicator := range productIndicators {
+		if strings.Contains(query, indicator) {
+			s.logger.Info("Product search detected (full query)", zap.String("product", indicator), zap.String("query", query))
+			return true
+		}
+	}
+	
+	// Check for product search action words combined with other context
+	searchActions := []string{"want to buy", "need to buy", "looking for", "search for", "find", "buy", "purchase"}
+	hasSearchAction := false
+	for _, action := range searchActions {
+		if strings.Contains(query, action) {
+			hasSearchAction = true
+			break
+		}
+	}
+	
+	// If it has search action, it's likely a product search (even if short)
+	if hasSearchAction {
+		s.logger.Info("Product search detected (search action)", zap.String("query", query))
+		return true
+	}
+	
+	// Check for price-related queries (these are product searches)
+	priceIndicators := []string{"under $", "under ", "below $", "less than $", "max $", "maximum $", "price", "$"}
+	for _, indicator := range priceIndicators {
+		if strings.Contains(query, indicator) {
+			s.logger.Info("Product search detected (price indicator)", zap.String("query", query))
+			return true
+		}
+	}
+	
+	// If query is a single word and it's a product name, treat as product search
+	if len(strings.Fields(query)) == 1 {
+		// Single word queries that are product names should trigger search
+		for _, indicator := range productIndicators {
+			if query == indicator {
+				s.logger.Info("Product search detected (single word product)", zap.String("query", query))
+				return true
+			}
+		}
+	}
+	
+	// Default: not a product search (let Gemini handle it as conversational)
+	return false
+}
+
+// ====== Gemini LLM Response Generation ======
+
+// generateGeminiResponse uses Gemini to generate natural, conversational responses
+func (s *AgentService) generateGeminiResponse(ctx context.Context, userQuery string, listings []domain.Listing, results []pubsub.ListingInfo, isProductSearch bool) (string, error) {
+	var prompt string
+	
+	if isProductSearch && len(results) > 0 {
+		// Product search with results - format listings for Gemini
+		listingsText := s.formatListingsForGemini(results)
+		prompt = fmt.Sprintf(`You are a helpful AI assistant for CampusHub, a campus marketplace where students buy and sell items.
+
+The user asked: "%s"
+
+I found %d matching listings in our database:
+
+%s
+
+Please provide a natural, friendly, and helpful response that:
+1. Acknowledges what the user is looking for
+2. Mentions that you found these listings
+3. Highlights 2-3 key details about the best matches (title, price, condition)
+4. Encourages them to check out the listings below
+5. Keep it conversational and not too long (2-3 sentences)
+
+Be friendly and helpful, like a real assistant would be.`, userQuery, len(results), listingsText)
+	} else if isProductSearch && len(results) == 0 {
+		// Product search with no results
+		prompt = fmt.Sprintf(`You are a helpful AI assistant for CampusHub, a campus marketplace where students buy and sell items.
+
+The user asked: "%s"
+
+Unfortunately, I couldn't find any matching listings in our database.
+
+Please provide a natural, friendly, and helpful response that:
+1. Acknowledges what they're looking for
+2. Politely explains that no listings were found
+3. Suggests they try different keywords, adjust price range, or check back later
+4. Keep it conversational and encouraging (2-3 sentences)
+
+Be friendly and helpful, like a real assistant would be.`, userQuery)
+	} else {
+		// Conversational query - no product search
+		prompt = fmt.Sprintf(`You are a helpful AI assistant for CampusHub, a campus marketplace where students buy and sell items like textbooks, electronics, furniture, and more.
+
+The user said: "%s"
+
+Please provide a natural, friendly, and conversational response. You can:
+- Answer questions about CampusHub
+- Help them understand how to use the platform
+- Chat naturally about general topics
+- Guide them on how to search for products (e.g., "I want to buy iPhone 17" or "MacBook under $500")
+
+Keep your response friendly, helpful, and conversational (2-4 sentences). Don't be too formal.`, userQuery)
+	}
+	
+	reqBody := GeminiRequest{
+		Contents: []GeminiContent{
+			{Parts: []GeminiPart{{Text: prompt}}},
+		},
+	}
+	
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+	
+	url := fmt.Sprintf("%s?key=%s", geminiURL, s.apiKey)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("gemini api error: %d - %s", resp.StatusCode, string(body))
+	}
+	
+	var gr GeminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
+		return "", err
+	}
+	
+	if len(gr.Candidates) == 0 || len(gr.Candidates[0].Content.Parts) == 0 {
+		return "", fmt.Errorf("no response from gemini")
+	}
+	
+	response := strings.TrimSpace(gr.Candidates[0].Content.Parts[0].Text)
+	return response, nil
+}
+
+// formatListingsForGemini formats listings in a way that's easy for Gemini to understand
+func (s *AgentService) formatListingsForGemini(results []pubsub.ListingInfo) string {
+	if len(results) == 0 {
+		return "No listings found."
+	}
+	
+	var sb strings.Builder
+	for i, listing := range results {
+		if i >= 10 { // Limit to top 10 for Gemini context
+			break
+		}
+		sb.WriteString(fmt.Sprintf("\n%d. %s", i+1, listing.Title))
+		if listing.Price > 0 {
+			sb.WriteString(fmt.Sprintf(" - $%.2f", listing.Price))
+		}
+		if listing.Condition != "" {
+			sb.WriteString(fmt.Sprintf(" (%s condition)", listing.Condition))
+		}
+		if listing.Category != "" {
+			sb.WriteString(fmt.Sprintf(" - Category: %s", listing.Category))
+		}
+		if listing.Description != "" && len(listing.Description) < 100 {
+			sb.WriteString(fmt.Sprintf(" - %s", listing.Description))
+		}
+	}
+	
+	return sb.String()
+}
+
+// generateFallbackConversationalResponse provides a simple fallback when Gemini is not available
+func (s *AgentService) generateFallbackConversationalResponse(query string) string {
+	query = strings.ToLower(query)
+	
+	if isGreeting(query) {
+		return "Hey! 👋 I'm the CampusHub assistant. I can help you find products on campus or just chat! Try asking me \"I want to buy iPhone 17\" or \"MacBook under $500\"!"
+	}
+	if isThanks(query) {
+		return "You're welcome! 😊 If you need anything else, just ask. I can help you find products or answer questions!"
+	}
+	if strings.Contains(query, "how are you") {
+		return "I'm doing great, thanks for asking! 😊 I'm here to help you find products on CampusHub. What are you looking for today?"
+	}
+	if strings.Contains(query, "what are you") || strings.Contains(query, "who are you") {
+		return "I'm the CampusHub AI assistant! I help students find products like textbooks, electronics, furniture, and more. Just tell me what you're looking for, and I'll search our listings for you."
+	}
+	if strings.Contains(query, "what can you do") || strings.Contains(query, "help") {
+		return "I can help you:\n• Search for products (e.g., \"I want to buy iPhone 17\" or \"MacBook under $500\")\n• Find textbooks by course (e.g., \"CMPE 202 textbook\")\n• Chat and answer questions\n\nJust ask me anything!"
+	}
+	
+	return "I'm here to help! I can search for products on CampusHub or chat with you. What would you like to know?"
+}
+
 // ====== Answer + DTO mapping ======
 
-// Natural language answer
+// Natural language answer (fallback when Gemini is not available)
 func (s *AgentService) generateAnswer(query string, intent *SearchIntent, resultCount int) string {
 	if resultCount == 0 {
 		return fmt.Sprintf("I couldn't find any items matching '%s'. Try adjusting your search or check back later!", query)
