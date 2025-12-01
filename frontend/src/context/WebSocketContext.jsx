@@ -22,17 +22,31 @@ export const WebSocketProvider = ({ children }) => {
     const reconnectDelay = 3000;
 
     const getWSUrl = () => {
-        
         const token = localStorage.getItem('authToken');
         if (!token) {
             throw new Error('No authentication token found');
         }
+        const raw = import.meta.env.VITE_WS_URL || 'localhost:8081';
+        const isSecure = window.location.protocol === 'https:';
+        const defaultProto = isSecure ? 'wss:' : 'ws:';
 
-        // Determine WebSocket URL based on environment
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = import.meta.env.VITE_WS_URL || 'localhost:8081';
-        
-        return `${protocol}//${host}/ws?token=${token}`;
+        try {
+            let origin;
+
+            if (/^wss?:\/\//i.test(raw) || /^https?:\/\//i.test(raw)) {
+                const parsed = new URL(raw);
+                origin = `${defaultProto}//${parsed.host}`;
+            } else {
+                origin = `${defaultProto}//${raw}`;
+            }
+
+            origin = origin.replace(/\/+$/g, '');
+
+            return `${origin}/ws?token=${encodeURIComponent(token)}`;
+        } catch (err) {
+            console.error('Invalid VITE_WS_URL, falling back to localhost:8081', raw, err);
+            return `${defaultProto}//localhost:8081/ws?token=${encodeURIComponent(token)}`;
+        }
     };
 
     const connect = useCallback(() => {
