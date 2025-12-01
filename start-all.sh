@@ -93,6 +93,31 @@ if [ ! -f .env ]; then
     echo -e "${YELLOW}   See backend/README.md for details${NC}"
 else
     echo -e "${GREEN} .env file found${NC}"
+    
+    # Check for Gemini API key (required for AI assistant)
+    if grep -q "GEMINI_API_KEY=" .env 2>/dev/null; then
+        GEMINI_KEY=$(grep "GEMINI_API_KEY=" .env | cut -d '=' -f2 | tr -d ' ' | tr -d '"' | tr -d "'")
+        if [ -z "$GEMINI_KEY" ] || [ "$GEMINI_KEY" = "" ]; then
+            echo -e "${YELLOW}   ⚠️  GEMINI_API_KEY is empty in .env file${NC}"
+            echo -e "${YELLOW}      AI assistant will use fallback responses (limited functionality)${NC}"
+            echo -e "${YELLOW}      Get your key from: https://makersuite.google.com/app/apikey${NC}"
+        else
+            echo -e "${GREEN}   ✓ GEMINI_API_KEY found (AI assistant enabled)${NC}"
+        fi
+    elif grep -q "OPENAI_API_KEY=" .env 2>/dev/null; then
+        OPENAI_KEY=$(grep "OPENAI_API_KEY=" .env | cut -d '=' -f2 | tr -d ' ' | tr -d '"' | tr -d "'")
+        if [ -z "$OPENAI_KEY" ] || [ "$OPENAI_KEY" = "" ]; then
+            echo -e "${YELLOW}   ⚠️  OPENAI_API_KEY is empty in .env file${NC}"
+            echo -e "${YELLOW}      AI assistant will use fallback responses (limited functionality)${NC}"
+        else
+            echo -e "${GREEN}   ✓ OPENAI_API_KEY found (AI assistant enabled)${NC}"
+        fi
+    else
+        echo -e "${YELLOW}   ⚠️  GEMINI_API_KEY or OPENAI_API_KEY not found in .env file${NC}"
+        echo -e "${YELLOW}      AI assistant will use fallback responses (limited functionality)${NC}"
+        echo -e "${YELLOW}      Add GEMINI_API_KEY=your-key-here to .env for full AI features${NC}"
+        echo -e "${YELLOW}      Get your key from: https://makersuite.google.com/app/apikey${NC}"
+    fi
 fi
 
 # Start API in background
@@ -159,6 +184,10 @@ echo -e "\n${GREEN} Logs:${NC}"
 echo -e "   • API:      tail -f /tmp/campushub-api.log"
 echo -e "   • WebSocket: tail -f /tmp/campushub-ws.log"
 echo -e "   • Frontend:  tail -f /tmp/campushub-frontend.log"
+echo -e "\n${YELLOW} AI Assistant:${NC}"
+echo -e "   • The AI assistant uses Gemini LLM for natural conversations"
+echo -e "   • Ensure GEMINI_API_KEY is set in backend/.env for full functionality"
+echo -e "   • Get your key: https://makersuite.google.com/app/apikey"
 echo -e "\n${YELLOW} To stop all services, run: ./stop-all.sh${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════════════${NC}\n"
 
