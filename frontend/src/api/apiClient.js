@@ -447,29 +447,8 @@ const api = {
       console.log("Starting image upload:", { listingId, fileName: file.name, fileType: file.type, isPrimary });
       
       // Step 1: Get presigned URL
-      // Note: presignUpload already returns the data directly (not wrapped in { data: ... })
+      // fetchAPI already unwraps response.data, so presignUpload returns { url, key } directly
       const presignData = await this.presignUpload(file.name, file.type);
-      
-      // Deep log the structure to understand what we're getting
-      console.log("Presigned URL obtained:", { 
-        presignData,
-        key: presignData?.key, 
-        hasUrl: !!presignData?.url,
-        urlPreview: presignData?.url?.substring(0, 100),
-        hasHeaders: !!presignData?.headers,
-        headersType: typeof presignData?.headers,
-        headersIsArray: Array.isArray(presignData?.headers),
-        headersIsNull: presignData?.headers === null,
-        headersIsUndefined: presignData?.headers === undefined,
-        headersKeys: presignData?.headers ? Object.keys(presignData.headers) : [],
-        headersValue: presignData?.headers,
-        // Stringify to see exact structure
-        headersStringified: JSON.stringify(presignData?.headers)
-      });
-      
-      if (!presignData || !presignData.key || !presignData.url) {
-        throw new Error("Invalid presigned URL response. Missing key or url.");
-      }
       
       // Step 2: Upload to S3
       await this.uploadToS3(presignData.url, presignData.headers, file, file.type);
@@ -479,8 +458,7 @@ const api = {
       const result = await this.completeUpload(listingId, presignData.key, isPrimary);
       console.log("Image attached to listing:", result);
       
-      // completeUpload also returns data directly
-      return result?.data || result;
+      return result;
     } catch (error) {
       console.error("Image upload failed:", error);
       throw error;
