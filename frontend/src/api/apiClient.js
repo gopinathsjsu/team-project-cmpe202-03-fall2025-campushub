@@ -549,6 +549,22 @@ const api = {
       auth: true,
     });
   },
+
+  // ==================== Chat ====================
+
+  async listChatThreads() {
+    if (USE_MOCK) {
+      return { items: [] };
+    }
+    return fetchAPI("/chat/threads", { auth: true });
+  },
+
+  async listChatMessages(conversationId, { limit = 50, offset = 0 } = {}) {
+    if (!conversationId) throw new Error("conversationId is required");
+    return fetchAPI(`/chat/threads/${conversationId}/messages?limit=${limit}&offset=${offset}`, {
+      auth: true,
+    });
+  },
 };
 
 export default api;
