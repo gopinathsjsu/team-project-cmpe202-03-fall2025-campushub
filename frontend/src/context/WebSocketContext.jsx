@@ -28,11 +28,20 @@ export const WebSocketProvider = ({ children }) => {
             throw new Error('No authentication token found');
         }
 
-        // Determine WebSocket URL based on environment
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = import.meta.env.VITE_WS_URL || 'localhost:8081';
+        // Get WebSocket URL from environment or use default
+        const wsUrlEnv = import.meta.env.VITE_WS_URL || 'localhost:8081';
         
-        return `${protocol}//${host}/ws?token=${token}`;
+        // If it's already a full URL (starts with ws:// or wss://), use it as-is
+        if (wsUrlEnv.startsWith('ws://') || wsUrlEnv.startsWith('wss://')) {
+            // Remove trailing slash if present
+            const baseUrl = wsUrlEnv.replace(/\/$/, '');
+            return `${baseUrl}/ws?token=${token}`;
+        }
+        
+        // Otherwise, construct the URL from host:port
+        // Determine protocol based on current page protocol
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${protocol}//${wsUrlEnv}/ws?token=${token}`;
     };
 
     const connect = useCallback(() => {
@@ -45,6 +54,7 @@ export const WebSocketProvider = ({ children }) => {
             // Clear ref after closing
             wsRef.current = null;
             setConnected(false);
+            setError(null); // Clear previous errors when attempting new connection
 
             const wsUrl = getWSUrl();
             const token = localStorage.getItem('authToken');
@@ -57,6 +67,17 @@ export const WebSocketProvider = ({ children }) => {
             
             const ws = new WebSocket(wsUrl);
             
+            // Set a connection timeout (10 seconds)
+            const connectionTimeout = setTimeout(() => {
+                if (ws.readyState === WebSocket.CONNECTING) {
+                    console.error('WebSocket connection timeout');
+                    ws.close();
+                    const wsUrlDisplay = wsUrl.replace(/token=.+/, 'token=***');
+                    setError(`Connection timeout. Unable to connect to WebSocket server at ${wsUrlDisplay}. Please ensure the server is running on port 8081.`);
+                    setConnected(false);
+                }
+            }, 10000);
+            
             // Log connection state changes
             ws.addEventListener('open', () => {
                 console.log('✅ WebSocket connection opened');
@@ -68,6 +89,8 @@ export const WebSocketProvider = ({ children }) => {
             
             ws.onopen = () => {
                 console.log('WebSocket connected');
+                // Clear connection timeout
+                clearTimeout(connectionTimeout);
                 // Always set ref first, then update state
                 wsRef.current = ws;
                 receivedMessageRef.current = false; // Reset message tracking
@@ -118,6 +141,8 @@ export const WebSocketProvider = ({ children }) => {
             };
 
             ws.onclose = (event) => {
+                // Clear connection timeout
+                clearTimeout(connectionTimeout);
                 console.log('WebSocket closed:', {
                     code: event.code,
                     reason: event.reason || 'No reason provided',
@@ -133,6 +158,7 @@ export const WebSocketProvider = ({ children }) => {
                 // Don't reconnect on normal closure
                 if (event.code === 1000) {
                     console.log('WebSocket closed normally');
+                    setError(null); // Clear error on normal closure
                     return;
                 }
                 
@@ -141,6 +167,9 @@ export const WebSocketProvider = ({ children }) => {
                 
                 // 1008 = Policy violation (likely auth failure)
                 // 1006 = Abnormal closure (connection lost)
+                // 1001 = Going away (server shutdown)
+                // 1002 = Protocol error
+                // 1003 = Unsupported data
                 if (event.code === 1008) {
                     if (!token) {
                         setError('Please log in to connect to chat. No authentication token found.');
@@ -157,25 +186,42 @@ export const WebSocketProvider = ({ children }) => {
                 }
                 
                 if (event.code === 1006) {
-                    setError('WebSocket connection lost. This might be a network issue. Please check your connection and refresh the page.');
+                    // Abnormal closure - could be server not running or network issue
+                    const wsUrl = getWSUrl().replace(/token=.+/, 'token=***');
+                    setError(`Cannot connect to WebSocket server. Please ensure the server is running on port 8081. (Attempting to connect to: ${wsUrl})`);
                     console.error('WebSocket abnormal closure:', {
                         code: event.code,
-                        reason: event.reason
+                        reason: event.reason,
+                        wsUrl: wsUrl
                     });
+                    
+                    // Still try to reconnect
+                    if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+                        reconnectAttemptsRef.current += 1;
+                        console.log(`Reconnecting... (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
+                        
+                        reconnectTimeoutRef.current = setTimeout(() => {
+                            connect();
+                        }, reconnectDelay);
+                    } else {
+                        setError(`Failed to connect after ${maxReconnectAttempts} attempts. Please check if the WebSocket server is running on port 8081.`);
+                    }
                     return;
                 }
 
                 // Attempt to reconnect if not a normal closure
                 if (reconnectAttemptsRef.current < maxReconnectAttempts) {
                     reconnectAttemptsRef.current += 1;
-                    console.log(`Reconnecting... (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
+                    const errorMsg = `Connection lost (code: ${event.code}). Reconnecting... (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`;
+                    setError(errorMsg);
+                    console.log(errorMsg);
                     
                     reconnectTimeoutRef.current = setTimeout(() => {
                         connect();
                     }, reconnectDelay);
                 } else {
                     const token = localStorage.getItem('authToken');
-                    let errorMsg = `Failed to connect after ${maxReconnectAttempts} attempts.`;
+                    let errorMsg = `Failed to connect after ${maxReconnectAttempts} attempts (code: ${event.code}).`;
                     if (!token) {
                         errorMsg += ' Please log in first.';
                     } else {

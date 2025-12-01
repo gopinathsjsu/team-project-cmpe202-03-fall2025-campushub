@@ -105,9 +105,14 @@ export default function SellPage() {
                     toast.loading(`Uploading image ${i + 1} of ${imageFiles.length}...`, { id: toastId });
                     
                     try {
-                        await api.uploadImage(created.id, imageFiles[i], i === 0); 
+                        const uploadResult = await api.uploadImage(created.id, imageFiles[i], i === 0);
+                        console.log(`Image ${i + 1} uploaded successfully:`, uploadResult);
                     } catch (imageError) {
                         console.error(`Failed to upload image ${i + 1}:`, imageError);
+                        toast.error(`Failed to upload image ${i + 1}: ${imageError.message || 'Unknown error'}`, { 
+                            id: toastId,
+                            duration: 5000 
+                        });
                     }
                 }
             }

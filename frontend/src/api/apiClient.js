@@ -324,19 +324,107 @@ const api = {
   /**
    * Step 2: Upload file to S3 using presigned URL
    */
-  async uploadToS3(presignedUrl, file, contentType) {
+  async uploadToS3(presignedUrl, presignedHeaders, file, contentType) {
+    // Note: Do NOT add auth headers when using presigned URLs
+    // The presigned URL already contains all authentication
+    // AWS S3 requires ALL signed headers to be included exactly as they were signed
+    
+    console.log("Processing presigned headers:", {
+      hasHeaders: !!presignedHeaders,
+      headersType: typeof presignedHeaders,
+      headersIsArray: Array.isArray(presignedHeaders),
+      headersValue: presignedHeaders,
+      headersKeys: presignedHeaders ? Object.keys(presignedHeaders) : []
+    });
+    
+    // Build headers object from presigned response
+    // Go's http.Header is map[string][]string, which JSON marshals as object with arrays
+    const headers = {};
+    let hasSignedHeaders = false;
+    
+    if (presignedHeaders && typeof presignedHeaders === 'object' && !Array.isArray(presignedHeaders)) {
+      // Process each header from the presigned response
+      Object.keys(presignedHeaders).forEach(key => {
+        const value = presignedHeaders[key];
+        
+        // Headers from Go's http.Header are arrays (even if single value)
+        if (Array.isArray(value)) {
+          if (value.length > 0) {
+            // Use the first value (most common case)
+            // For headers with multiple values, join them with comma (HTTP spec)
+            headers[key] = value.length === 1 ? value[0] : value.join(', ');
+            hasSignedHeaders = true;
+          }
+        } else if (value != null && value !== '') {
+          // Handle case where it's already a string (shouldn't happen with Go, but be safe)
+          headers[key] = String(value);
+          hasSignedHeaders = true;
+        }
+      });
+    }
+    
+    // CRITICAL: For AWS S3 presigned PUT requests:
+    // 1. If SignedHeader contains headers, they MUST be included (they're part of signature)
+    // 2. If SignedHeader is empty, we may still need Content-Type
+    // 3. The Content-Type in headers (if present) MUST match what was signed
+    
+    // Only add Content-Type if:
+    // - No signed headers were provided (empty SignedHeader), OR
+    // - Signed headers exist but don't include Content-Type
+    if (!hasSignedHeaders) {
+      // No signed headers - safe to add Content-Type
+      headers['Content-Type'] = contentType;
+    } else if (!headers['Content-Type'] && !headers['content-type']) {
+      // Signed headers exist but no Content-Type - this is unusual but handle it
+      console.warn("Signed headers present but no Content-Type found. Adding Content-Type:", contentType);
+      headers['Content-Type'] = contentType;
+    }
+    // If Content-Type is already in signed headers, don't touch it - it's part of signature!
+    
+    console.log("Uploading to S3:", {
+      url: presignedUrl.substring(0, 150) + '...',
+      headerKeys: Object.keys(headers),
+      headers: headers,
+      hasContentType: !!(headers['Content-Type'] || headers['content-type']),
+      contentType: headers['Content-Type'] || headers['content-type'],
+      fileSize: file.size,
+      fileType: file.type,
+      expectedContentType: contentType
+    });
     
     const response = await fetch(presignedUrl, {
       method: "PUT",
-      auth:true,
-      headers: {
-        "Content-Type": contentType,
-      },
+      headers: headers,
       body: file,
     });
 
     if (!response.ok) {
-      throw new Error("Failed to upload to S3");
+      const errorText = await response.text().catch(() => 'Unknown error');
+      
+      // Try to parse XML error for more details
+      let errorDetails = errorText;
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(errorText, 'text/xml');
+        const code = xmlDoc.querySelector('Code')?.textContent;
+        const message = xmlDoc.querySelector('Message')?.textContent;
+        if (code || message) {
+          errorDetails = `S3 Error: ${code || 'Unknown'} - ${message || errorText}`;
+        }
+      } catch (e) {
+        // If XML parsing fails, use raw error text
+      }
+      
+      console.error("S3 upload failed:", {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorDetails,
+        url: presignedUrl.substring(0, 150) + '...',
+        headersSent: headers,
+        responseHeaders: Object.fromEntries(response.headers.entries())
+      });
+      
+      throw new Error(`Failed to upload to S3: ${response.status} ${response.statusText}. ${errorDetails}`);
     }
 
     return { success: true };
@@ -356,16 +444,43 @@ const api = {
 
   async uploadImage(listingId, file, isPrimary = false) {
     try {
+      console.log("Starting image upload:", { listingId, fileName: file.name, fileType: file.type, isPrimary });
+      
       // Step 1: Get presigned URL
-      const { data: presignData } = await this.presignUpload(file.name, file.type);
+      // Note: presignUpload already returns the data directly (not wrapped in { data: ... })
+      const presignData = await this.presignUpload(file.name, file.type);
+      
+      // Deep log the structure to understand what we're getting
+      console.log("Presigned URL obtained:", { 
+        presignData,
+        key: presignData?.key, 
+        hasUrl: !!presignData?.url,
+        urlPreview: presignData?.url?.substring(0, 100),
+        hasHeaders: !!presignData?.headers,
+        headersType: typeof presignData?.headers,
+        headersIsArray: Array.isArray(presignData?.headers),
+        headersIsNull: presignData?.headers === null,
+        headersIsUndefined: presignData?.headers === undefined,
+        headersKeys: presignData?.headers ? Object.keys(presignData.headers) : [],
+        headersValue: presignData?.headers,
+        // Stringify to see exact structure
+        headersStringified: JSON.stringify(presignData?.headers)
+      });
+      
+      if (!presignData || !presignData.key || !presignData.url) {
+        throw new Error("Invalid presigned URL response. Missing key or url.");
+      }
       
       // Step 2: Upload to S3
-      await this.uploadToS3(presignData.url, file, file.type);
+      await this.uploadToS3(presignData.url, presignData.headers, file, file.type);
+      console.log("File uploaded to S3 successfully");
       
       // Step 3: Complete and attach to listing
       const result = await this.completeUpload(listingId, presignData.key, isPrimary);
+      console.log("Image attached to listing:", result);
       
-      return result.data;
+      // completeUpload also returns data directly
+      return result?.data || result;
     } catch (error) {
       console.error("Image upload failed:", error);
       throw error;
