@@ -1,23 +1,23 @@
 # CMPE-202 Fall 2025 - Team CampusHub
 
 ## Team Members:
-- **[Team Member 1]**
-- **[Team Member 2]**
-- **[Team Member 3]**
-- **[Team Member 4]**
+- **Deven Jaimin Desai - 018286944**
+- **Yug Harshadkumar Patel - 018278052**
+- **Neeraja Abhinav Buch - 018178238**
+- **Tanisha Ashishbhai Dave - 019110351**
 
 ## Team Contributions:
-- **[Team Member 1]** - [Role and responsibilities]
-- **[Team Member 2]** - [Role and responsibilities]
-- **[Team Member 3]** - [Role and responsibilities]
-- **[Team Member 4]** - [Role and responsibilities]
+- **Yug Harshadkumar Patel** - Buyer/Seller Module & Deployment
+- **Deven Jaimin Desai** - Admin Dashboard and Authentication
+- **Neeraja Abhinav Buch** - Real time chat and AI Assistant
+- **Tanisha Ashishbhai Dave** - Buyer/Seller Module
 
 ## Project Links:
 - **Git Repo**: https://github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub
-- **User Story Document**: [Add Google Docs link]
-- **Sprint Plan Document**: [Add Google Docs link]
-- **Project Journal**: [Add Google Docs link]
-- **WireFrame**: [Add link to wireframes in docs folder]
+- **User Story Document**: https://github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/blob/main/project-journal-docs/User%20Story%20and%20Sprint%20Plan.xlsx
+- **Sprint Plan Document**: https://github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/blob/main/project-journal-docs/User%20Story%20and%20Sprint%20Plan.xlsx
+- **Project Journal - Scrum Report**: https://github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/blob/main/project-journal-docs/Weekly%20Scrum%20Report.docx
+- **WireFrame**: https://github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub/blob/main/project-journal-docs/Wireframe-UI.pdf
 
 ---
 
@@ -102,17 +102,7 @@
    
    The application will run at http://localhost:5173
 
----
 
-## 🌐 Service URLs
-
-Once all services are running:
-
-- **Frontend**: http://localhost:5173
-- **API Server**: http://localhost:8082
-- **WebSocket**: ws://localhost:8081
-- **MinIO Console**: http://localhost:9001
----
 
 ## XP Core Values:
 
@@ -133,7 +123,7 @@ Once all services are running:
 
 - **Backend**: Go + Gin Framework + WebSocket
 - **Frontend**: React.js + Vite + Tailwind CSS
-- **Database**: PostgreSQL
+- **Database**: Aurora and PostgreSQL
 - **Storage**: AWS S3 / MinIO
 - **Real-time Chat**: Firebase Firestore
 - **AI Integration**: Google Gemini 2.5 Flash API
