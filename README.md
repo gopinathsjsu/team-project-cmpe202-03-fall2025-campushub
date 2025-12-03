@@ -1,30 +1,29 @@
-# CampusHub - Complete Setup Guide
+# CMPE-202 Fall 2025 - Team CampusHub
 
-This guide will help you run all services for the CampusHub application.
+## Team Members:
+- **[Team Member 1]**
+- **[Team Member 2]**
+- **[Team Member 3]**
+- **[Team Member 4]**
 
-## 🚀 Quick Start
+## Team Contributions:
+- **[Team Member 1]** - [Role and responsibilities]
+- **[Team Member 2]** - [Role and responsibilities]
+- **[Team Member 3]** - [Role and responsibilities]
+- **[Team Member 4]** - [Role and responsibilities]
 
-### Option 1: Automated Script (Recommended)
-
-```bash
-# Make scripts executable
-chmod +x start-all.sh stop-all.sh
-
-# Start all services
-./start-all.sh
-
-# Stop all services
-./stop-all.sh
-```
-
-### Option 2: Manual Setup
-
-Follow the steps below to start each service manually.
+## Project Links:
+- **Git Repo**: https://github.com/gopinathsjsu/team-project-cmpe202-03-fall2025-campushub
+- **User Story Document**: [Add Google Docs link]
+- **Sprint Plan Document**: [Add Google Docs link]
+- **Project Journal**: [Add Google Docs link]
+- **WireFrame**: [Add link to wireframes in docs folder]
 
 ---
 
-## 📋 Prerequisites
+## To Run the Project Locally:
 
+### Prerequisites
 - **Docker & Docker Compose** - For PostgreSQL and MinIO
 - **Go 1.21+** - For backend services
 - **Node.js 18+** - For frontend
@@ -32,86 +31,76 @@ Follow the steps below to start each service manually.
 
 ---
 
-## 🔧 Step-by-Step Setup
+## Backend Setup
 
-### 1. Start Docker Services (PostgreSQL + MinIO)
+1. **Start Docker Services (PostgreSQL + MinIO)**
+   ```bash
+   cd backend/build
+   docker compose -f docker-compose.dev.yml up -d
+   ```
+   
+   Verify services are running:
+   ```bash
+   docker ps
+   ```
+   
+   Create MinIO bucket:
+   - Open http://localhost:9001
+   - Login: `minioadmin` / `minioadmin`
+   - Create bucket: `campushub-01-uploads`
 
-```bash
-cd backend/build
-docker compose -f docker-compose.dev.yml up -d
-```
+2. **Run Database Migrations**
+   ```bash
+   cd backend/build
+   cat ../migrations/*.sql | docker compose -f docker-compose.dev.yml exec -T db psql -U postgres -d campus -v ON_ERROR_STOP=1 -f -
+   ```
 
-**Verify services are running:**
-```bash
-docker ps
-```
+3. **Configure Backend Environment**
+   
+   Create `backend/.env` file with your credentials
 
-**Create MinIO bucket:**
-1. Open http://localhost:9001
-2. Login with `minioadmin` / `minioadmin`
-3. Create bucket: `campushub-01-uploads`
+4. **Start Backend Services**
+   
+   Open three separate terminals:
+   
+   **Terminal 1 - API Server:**
+   ```bash
+   cd backend
+   go run cmd/api/main.go
+   ```
+   
+   **Terminal 2 - WebSocket Server:**
+   ```bash
+   cd backend
+   go run cmd/ws/main.go
+   ```
+   
+   **Terminal 3 - Worker:**
+   ```bash
+   cd backend
+   go run cmd/worker/main.go
+   ```
 
-### 2. Run Database Migrations
+---
 
-```bash
-cd backend
-cat migrations/*.sql | docker compose -f build/docker-compose.dev.yml exec -T db psql -U postgres -d campus -v ON_ERROR_STOP=1 -f -
-```
+## Frontend Setup
 
-### 3. Configure Backend Environment
+1. **Install Dependencies**
+   ```bash
+   cd frontend
+   npm install
+   ```
 
-Create `backend/.env` file:
+2. **Configure Frontend Environment**
+   
+   Create `frontend/.env` file with your Firebase and API credentials
 
-```env
-ENV=dev
-PORT=8082
-WS_PORT=8081
-DB_DSN=postgres://postgres:postgres@localhost:5434/campus?sslmode=disable
-JWT_SECRET=supersecret-dev-key
-GEMINI_API_KEY=your-gemini-api-key-here
-S3_BUCKET=campushub-01-uploads
-S3_REGION=us-east-1
-S3_ENDPOINT=http://localhost:9000
-S3_PATH_STYLE=true
-PRESIGN_EXPIRY=15
-```
-
-### 4. Start Backend Services
-
-**Terminal 1 - API Server:**
-```bash
-cd backend
-make run-api
-```
-
-**Terminal 2 - WebSocket Server:**
-```bash
-cd backend
-make run-ws
-```
-
-**Terminal 3 - Worker (Optional):**
-```bash
-cd backend
-make run-worker
-```
-
-### 5. Configure Frontend Environment
-
-Create `frontend/.env` file:
-
-```env
-VITE_API_URL=http://localhost:8082/v1
-VITE_WS_URL=ws://localhost:8081
-```
-
-### 6. Start Frontend
-
-```bash
-cd frontend
-npm install  # First time only
-npm run dev
-```
+3. **Start Development Server**
+   ```bash
+   npm run dev
+   ```
+   
+   The application will run at http://localhost:5173
 
 ---
 
@@ -123,82 +112,95 @@ Once all services are running:
 - **API Server**: http://localhost:8082
 - **WebSocket**: ws://localhost:8081
 - **MinIO Console**: http://localhost:9001
-- **PostgreSQL**: localhost:5434
+---
+
+## XP Core Values:
+
+**Communication:**
+- Regular sprint planning and task ownership were distributed among team members
+- Shared responsibilities fostered collaboration across frontend, backend, and deployment
+- Wireframes and UI designs were iterated on together
+- Daily standups and consistent updates maintained team alignment
+
+**Feedback:**
+- Features were tested early and refined based on user feedback and bug reports
+- Code reviews and pull requests ensured quality and knowledge sharing
+- Continuous integration of feedback improved system reliability and user experience
 
 ---
 
-## 🧪 Health Checks
+## Tech Stack:
 
-**API Health:**
-```bash
-curl http://localhost:8082/healthz
-```
-
-**Database:**
-```bash
-docker compose -f backend/build/docker-compose.dev.yml exec db psql -U postgres -d campus -c "\dt"
-```
-
----
-
-## 🛑 Stopping Services
-
-### Using the script:
-```bash
-./stop-all.sh
-```
-
-### Manually:
-
-1. **Stop Frontend**: Press `Ctrl+C` in the frontend terminal
-2. **Stop Backend**: Press `Ctrl+C` in each backend terminal
-3. **Stop Docker** (optional):
-   ```bash
-   cd backend/build
-   docker compose -f docker-compose.dev.yml down
-   ```
+- **Backend**: Go + Gin Framework + WebSocket
+- **Frontend**: React.js + Vite + Tailwind CSS
+- **Database**: PostgreSQL
+- **Storage**: AWS S3 / MinIO
+- **Real-time Chat**: Firebase Firestore
+- **AI Integration**: Google Gemini 2.5 Flash API
+- **Deployment**: AWS EC2 + Load Balancer
+- **Containerization**: Docker + Docker Compose
 
 ---
 
-## 📝 Troubleshooting
+## Feature Set:
 
-### Port Already in Use
-If a port is already in use, either:
-- Stop the service using that port
-- Change the port in the respective `.env` file
+1. **User Authentication**
+   - User signup and login functionality
+   - JWT-based secure authentication
+   - Profile management
 
-### Database Connection Issues
-- Ensure Docker services are running: `docker ps`
-- Check `DB_DSN` in `backend/.env` uses port `5434`
+2. **Marketplace Features**
+   - Browse listings with filters (category, price range, condition)
+   - Search functionality for finding specific items
+   - Listing creation with image upload support
+   - View detailed listing information with seller contact
 
-### MinIO Bucket Not Found
-- Access MinIO console at http://localhost:9001
-- Create bucket: `campushub-01-uploads`
+3. **Real-time Chat System**
+   - Buyer-seller messaging using Firebase
+   - AI-powered chatbot assistant with Gemini integration
+   - Admin communication for support and moderation
 
-### Frontend Can't Connect to Backend
-- Verify `VITE_API_URL` in `frontend/.env`
-- Check backend API is running on port 8082
-- Check browser console for CORS errors
+4. **Admin Dashboard**
+   - View and manage all listings
+   - User management and moderation
+   - Report handling and resolution
+   - Platform analytics
 
----
+5. **Image Management**
+   - AWS S3 integration for image storage
+   - Presigned URL generation for secure uploads
+   - Multiple images per listing support
 
-## 📚 Additional Documentation
-
-- [Backend README](./backend/README.md) - Detailed backend setup
-- [Frontend README](./frontend/README.md) - Frontend development guide
-- [API Documentation](./backend/APIDocumentation.md) - API endpoints
-- [WebSocket Chatbot](./backend/WEBSOCKET_CHATBOT.md) - WebSocket features
-
----
-
-## 🎯 Development Workflow
-
-1. **Start Docker services** (run once, stays up)
-2. **Start backend services** (API + WebSocket)
-3. **Start frontend** (auto-reloads on changes)
-4. **Make changes** and see them reflected immediately
+6. **WebSocket Integration**
+   - Real-time notifications
+   - Live chat updates
+   - Connection status tracking
 
 ---
 
-**Happy Coding! 🚀**
+## Design Decisions:
 
+- **Go for Backend**: Chosen for its excellent concurrency support, performance, and ease of deployment. Perfect for handling WebSocket connections and real-time features.
+
+- **React + Vite**: Selected for fast development experience, hot module replacement, and modern build tooling. Vite provides significantly faster builds compared to traditional bundlers.
+
+- **PostgreSQL**: Selected for its reliability, ACID compliance, and robust support for complex queries needed for marketplace filtering and search.
+
+- **Firebase for Chat**: Provides real-time synchronization out of the box, reducing development time for chat features while ensuring scalability.
+
+- **Gemini AI Integration**: Leverages Google's latest AI model for intelligent chatbot responses, helping users find items and get marketplace assistance.
+
+- **Tailwind CSS**: Utility-first approach enables rapid UI development with consistent design and responsive layouts.
+
+- **Microservices Architecture**: Separated API server, WebSocket server, and worker processes for better scalability and maintenance.
+
+---
+
+## Additional Documentation:
+
+- [Backend README](./backend/README.md) - Detailed backend architecture and setup
+- [API Documentation](./backend/APIDocumentation.md) - Complete API endpoint reference
+- [WebSocket Documentation](./backend/WEBSOCKET_CHATBOT.md) - WebSocket implementation details
+- [Gemini Integration](./backend/GEMINI_INTEGRATION.md) - AI chatbot setup guide
+
+**Note**: All project documents, diagrams, and wireframes are available in the `project-journal-docs/` folder.
